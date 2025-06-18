@@ -594,7 +594,7 @@ This creates a command with ID `user:git:commit`.
 ### Using Custom Commands
 
 1. Press `Ctrl+K` to open the command dialog
-2. Select your custom command (prefixed with either `user:` or `project:`)
+2. Select your custom command (prefixed witcdh either `user:` or `project:`)
 3. Press Enter to execute the command
 
 The content of the command file will be sent as a message to the AI assistant.
