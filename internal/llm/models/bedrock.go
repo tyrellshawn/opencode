@@ -44,7 +44,7 @@ var BedrockModels = map[ModelID]Model{
 		Provider:            ProviderBedrock,
 		APIModel:            "anthropic.claude-opus-4-20250514-v1:0",
 		CostPer1MIn:         15.0,
-		CostPer1MInCached:   18.75,
+		CostPer1MInCached:   18.0,
 		CostPer1MOutCached:  1.50,
 		CostPer1MOut:        75.0,
 		ContextWindow:       200_000,
