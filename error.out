@@ -1,0 +1,54 @@
+github.com/sst/opencode/cmd imports
+	log/slog: malformed module path "log/slog": missing dot in first path element
+github.com/sst/opencode/internal/app imports
+	maps: malformed module path "maps": missing dot in first path element
+github.com/sst/opencode/internal/db imports
+	embed: malformed module path "embed": missing dot in first path element
+github.com/sst/opencode/internal/fileutil imports
+	io/fs: malformed module path "io/fs": missing dot in first path element
+github.com/sst/opencode/internal/history imports
+	slices: malformed module path "slices": missing dot in first path element
+github.com/sst/opencode/internal/llm/provider imports
+	google.golang.org/genai imports
+	iter: malformed module path "iter": missing dot in first path element
+github.com/sst/opencode/internal/config imports
+	github.com/spf13/viper imports
+	github.com/go-viper/mapstructure/v2 imports
+	net/netip: malformed module path "net/netip": missing dot in first path element
+github.com/sst/opencode/internal/db imports
+	github.com/pressly/goose/v3 tested by
+	github.com/pressly/goose/v3.test imports
+	testing/fstest: malformed module path "testing/fstest": missing dot in first path element
+github.com/sst/opencode/cmd imports
+	github.com/charmbracelet/log imports
+	golang.org/x/exp/slog imports
+	golang.org/x/exp/slices imports
+	cmp: malformed module path "cmp": missing dot in first path element
+github.com/sst/opencode/internal/llm/provider imports
+	google.golang.org/genai imports
+	cloud.google.com/go/auth/httptransport imports
+	cloud.google.com/go/auth/internal/transport imports
+	github.com/google/s2a-go imports
+	github.com/google/s2a-go/internal/handshaker imports
+	google.golang.org/grpc imports
+	math/rand/v2: malformed module path "math/rand/v2": missing dot in first path element
+github.com/sst/opencode/internal/llm/provider imports
+	google.golang.org/genai imports
+	cloud.google.com/go/auth/httptransport imports
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp imports
+	go.opentelemetry.io/otel imports
+	github.com/go-logr/logr tested by
+	github.com/go-logr/logr.test imports
+	github.com/go-logr/logr/internal/testhelp imports
+	testing/slogtest: malformed module path "testing/slogtest": missing dot in first path element
+github.com/sst/opencode/internal/db imports
+	github.com/pressly/goose/v3 tested by
+	github.com/pressly/goose/v3.test imports
+	modernc.org/sqlite imports
+	modernc.org/libc tested by
+	modernc.org/libc.test imports
+	modernc.org/ccgo/v4/lib imports
+	golang.org/x/tools/go/packages imports
+	golang.org/x/tools/go/gcexportdata imports
+	golang.org/x/tools/go/types/typeutil imports
+	hash/maphash: malformed module path "hash/maphash": missing dot in first path element
