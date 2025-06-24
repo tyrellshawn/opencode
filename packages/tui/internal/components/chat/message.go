@@ -44,7 +44,6 @@ func toMarkdown(content string, width int, backgroundColor compat.AdaptiveColor)
 			}
 		}
 	}
-
 	content = strings.Join(lines, "\n")
 	return strings.TrimSuffix(content, "\n")
 }
@@ -227,7 +226,11 @@ func renderText(message client.MessageInfo, text string, author string) string {
 	textWidth := max(lipgloss.Width(text), lipgloss.Width(info))
 	markdownWidth := min(textWidth, width-padding-4) // -4 for the border and padding
 	if message.Role == client.Assistant {
-		markdownWidth = width - padding - 4
+		markdownWidth = width - padding - 4 - 2
+	}
+	if message.Role == client.User {
+		text = strings.ReplaceAll(text, "<", "\\<")
+		text = strings.ReplaceAll(text, ">", "\\>")
 	}
 	content := toMarkdown(text, markdownWidth, t.BackgroundPanel())
 	content = strings.Join([]string{content, info}, "\n")
@@ -250,7 +253,7 @@ func renderText(message client.MessageInfo, text string, author string) string {
 func renderToolInvocation(
 	toolCall client.MessageToolInvocationToolCall,
 	result *string,
-	metadata client.MessageInfo_Metadata_Tool_AdditionalProperties,
+	metadata client.MessageMetadata_Tool_AdditionalProperties,
 	showDetails bool,
 	isLast bool,
 	contentOnly bool,
@@ -463,7 +466,7 @@ func renderToolInvocation(
 
 						if metadata, ok := call["metadata"].(map[string]any); ok {
 							data, _ = json.Marshal(metadata)
-							var toolMetadata client.MessageInfo_Metadata_Tool_AdditionalProperties
+							var toolMetadata client.MessageMetadata_Tool_AdditionalProperties
 							_ = json.Unmarshal(data, &toolMetadata)
 
 							step := renderToolInvocation(

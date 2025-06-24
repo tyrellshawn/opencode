@@ -1,4 +1,5 @@
 import { AuthAnthropic } from "../../auth/anthropic"
+import { AuthGithubCopilot } from "../../auth/github-copilot"
 import { Auth } from "../../auth"
 import { cmd } from "./cmd"
 import * as prompts from "@clack/prompts"
@@ -9,7 +10,7 @@ import { map, pipe, sortBy, values } from "remeda"
 
 export const AuthCommand = cmd({
   command: "auth",
-  describe: "Manage credentials",
+  describe: "manage credentials",
   builder: (yargs) =>
     yargs
       .command(AuthLoginCommand)
@@ -40,15 +41,16 @@ export const AuthListCommand = cmd({
 
 export const AuthLoginCommand = cmd({
   command: "login",
-  describe: "login to a provider",
+  describe: "log in to a provider",
   async handler() {
     UI.empty()
     prompts.intro("Add credential")
     const providers = await ModelsDev.get()
     const priority: Record<string, number> = {
       anthropic: 0,
-      openai: 1,
-      google: 2,
+      "github-copilot": 1,
+      openai: 2,
+      google: 3,
     }
     let provider = await prompts.select({
       message: "Select provider",
@@ -146,6 +148,37 @@ export const AuthLoginCommand = cmd({
       }
     }
 
+    if (provider === "github-copilot") {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      const deviceInfo = await AuthGithubCopilot.authorize()
+
+      prompts.note(
+        `Please visit: ${deviceInfo.verification}\nEnter code: ${deviceInfo.user}`,
+      )
+
+      const spinner = prompts.spinner()
+      spinner.start("Waiting for authorization...")
+
+      while (true) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, deviceInfo.interval * 1000),
+        )
+        const status = await AuthGithubCopilot.poll(deviceInfo.device)
+        if (status === "pending") continue
+        if (status === "complete") {
+          spinner.stop("Login successful")
+          break
+        }
+        if (status === "failed") {
+          spinner.stop("Failed to authorize", 1)
+          break
+        }
+      }
+
+      prompts.outro("Done")
+      return
+    }
+
     const key = await prompts.password({
       message: "Enter your API key",
       validate: (x) => (x.length > 0 ? undefined : "Required"),
@@ -162,7 +195,7 @@ export const AuthLoginCommand = cmd({
 
 export const AuthLogoutCommand = cmd({
   command: "logout",
-  describe: "logout from a configured provider",
+  describe: "log out from a configured provider",
   async handler() {
     UI.empty()
     const credentials = await Auth.all().then((x) => Object.entries(x))

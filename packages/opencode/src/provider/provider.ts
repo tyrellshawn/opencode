@@ -19,6 +19,7 @@ import type { Tool } from "../tool/tool"
 import { WriteTool } from "../tool/write"
 import { TodoReadTool, TodoWriteTool } from "../tool/todo"
 import { AuthAnthropic } from "../auth/anthropic"
+import { AuthGithubCopilot } from "../auth/github-copilot"
 import { ModelsDev } from "./models"
 import { NamedError } from "../util/error"
 import { Auth } from "../auth"
@@ -66,6 +67,43 @@ export namespace Provider {
         },
       }
     },
+    "github-copilot": async (provider) => {
+      const info = await AuthGithubCopilot.access()
+      if (!info) return false
+
+      if (provider && provider.models) {
+        for (const model of Object.values(provider.models)) {
+          model.cost = {
+            input: 0,
+            output: 0,
+          }
+        }
+      }
+
+      return {
+        options: {
+          apiKey: "",
+          async fetch(input: any, init: any) {
+            const token = await AuthGithubCopilot.access()
+            if (!token) throw new Error("GitHub Copilot authentication expired")
+            const headers = {
+              ...init.headers,
+              Authorization: `Bearer ${token}`,
+              "User-Agent": "GitHubCopilotChat/0.26.7",
+              "Editor-Version": "vscode/1.99.3",
+              "Editor-Plugin-Version": "copilot-chat/0.26.7",
+              "Copilot-Integration-Id": "vscode-chat",
+              "Openai-Intent": "conversation-edits",
+            }
+            delete headers["x-api-key"]
+            return fetch(input, {
+              ...init,
+              headers,
+            })
+          },
+        },
+      }
+    },
     openai: async () => {
       return {
         async getModel(sdk: any, modelID: string) {
@@ -75,7 +113,8 @@ export namespace Provider {
       }
     },
     "amazon-bedrock": async () => {
-      if (!process.env["AWS_PROFILE"]) return false
+      if (!process.env["AWS_PROFILE"] && !process.env["AWS_ACCESS_KEY_ID"])
+        return false
 
       const region = process.env["AWS_REGION"] ?? "us-east-1"
 
@@ -208,8 +247,9 @@ export namespace Provider {
     for (const [providerID, fn] of Object.entries(CUSTOM_LOADERS)) {
       if (disabled.has(providerID)) continue
       const result = await fn(database[providerID])
-      if (result)
+      if (result) {
         mergeProvider(providerID, result.options, "custom", result.getModel)
+      }
     }
 
     // load config

@@ -117,7 +117,7 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			updated, cmd := a.completions.Update(
-				app.CompletionDialogTriggerdMsg{
+				app.CompletionDialogTriggeredMsg{
 					InitialValue: initialValue,
 				},
 			)
@@ -178,7 +178,7 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// 7. Fallback to editor. This is for other characters
-		// likek backspace, tab, etc.
+		// like backspace, tab, etc.
 		updatedEditor, cmd := a.editor.Update(msg)
 		a.editor = updatedEditor.(chat.EditorComponent)
 		return a, cmd
@@ -189,6 +189,7 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		updated, cmd := a.messages.Update(msg)
 		a.messages = updated.(chat.MessagesComponent)
 		cmds = append(cmds, cmd)
+		return a, tea.Batch(cmds...)
 	case tea.BackgroundColorMsg:
 		styles.Terminal = &styles.TerminalInfo{
 			BackgroundIsDark: msg.IsDark(),
@@ -229,12 +230,33 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case client.EventMessageUpdated:
 		if msg.Properties.Info.Metadata.SessionID == a.app.Session.Id {
 			exists := false
-			for i, m := range a.app.Messages {
-				if m.Id == msg.Properties.Info.Id {
-					a.app.Messages[i] = msg.Properties.Info
-					exists = true
+			optimisticReplaced := false
+			
+			// First check if this is replacing an optimistic message
+			if msg.Properties.Info.Role == client.User {
+				// Look for optimistic messages to replace
+				for i, m := range a.app.Messages {
+					if strings.HasPrefix(m.Id, "optimistic-") && m.Role == client.User {
+						// Replace the optimistic message with the real one
+						a.app.Messages[i] = msg.Properties.Info
+						exists = true
+						optimisticReplaced = true
+						break
+					}
 				}
 			}
+			
+			// If not replacing optimistic, check for existing message with same ID
+			if !optimisticReplaced {
+				for i, m := range a.app.Messages {
+					if m.Id == msg.Properties.Info.Id {
+						a.app.Messages[i] = msg.Properties.Info
+						exists = true
+						break
+					}
+				}
+			}
+			
 			if !exists {
 				a.app.Messages = append(a.app.Messages, msg.Properties.Info)
 			}
@@ -363,7 +385,7 @@ func (a appModel) executeCommand(command commands.Command) (tea.Model, tea.Cmd) 
 	}
 	switch command.Name {
 	case commands.AppHelpCommand:
-		helpDialog := dialog.NewHelpDialog(a.app.Commands.Sorted())
+		helpDialog := dialog.NewHelpDialog(a.app)
 		a.modal = helpDialog
 	case commands.EditorOpenCommand:
 		if a.app.IsBusy() {

@@ -1,71 +1,62 @@
 package dialog
 
 import (
-	"strings"
-
+	"github.com/charmbracelet/bubbles/v2/viewport"
 	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/lipgloss/v2"
-	"github.com/sst/opencode/internal/commands"
+	"github.com/sst/opencode/internal/app"
+	commandsComponent "github.com/sst/opencode/internal/components/commands"
 	"github.com/sst/opencode/internal/components/modal"
 	"github.com/sst/opencode/internal/layout"
 	"github.com/sst/opencode/internal/theme"
 )
 
 type helpDialog struct {
-	width    int
-	height   int
-	modal    *modal.Modal
-	commands []commands.Command
+	width             int
+	height            int
+	modal             *modal.Modal
+	app               *app.App
+	commandsComponent commandsComponent.CommandsComponent
+	viewport          viewport.Model
 }
 
 func (h *helpDialog) Init() tea.Cmd {
-	return nil
+	return tea.Batch(
+		h.commandsComponent.Init(),
+		h.viewport.Init(),
+	)
 }
 
 func (h *helpDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		h.width = msg.Width
 		h.height = msg.Height
+		// Set viewport size with some padding for the modal
+		h.viewport = viewport.New(viewport.WithWidth(msg.Width-4), viewport.WithHeight(msg.Height-6))
+		h.commandsComponent.SetSize(msg.Width-4, msg.Height-6)
 	}
-	return h, nil
+
+	// Update commands component first to get the latest content
+	_, cmdCmd := h.commandsComponent.Update(msg)
+	cmds = append(cmds, cmdCmd)
+
+	// Update viewport content
+	h.viewport.SetContent(h.commandsComponent.View())
+
+	// Update viewport
+	var vpCmd tea.Cmd
+	h.viewport, vpCmd = h.viewport.Update(msg)
+	cmds = append(cmds, vpCmd)
+
+	return h, tea.Batch(cmds...)
 }
 
 func (h *helpDialog) View() string {
 	t := theme.CurrentTheme()
-	keyStyle := lipgloss.NewStyle().
-		Background(t.BackgroundElement()).
-		Foreground(t.Text()).
-		Bold(true)
-	descStyle := lipgloss.NewStyle().
-		Background(t.BackgroundElement()).
-		Foreground(t.TextMuted())
-	contentStyle := lipgloss.NewStyle().
-		PaddingLeft(1).Background(t.BackgroundElement())
-
-	lines := []string{}
-	for _, b := range h.commands {
-		// Only interested in slash commands
-		if b.Trigger == "" {
-			continue
-		}
-
-		content := keyStyle.Render("/" + b.Trigger)
-		content += descStyle.Render(" " + b.Description)
-		// for i, key := range b.Keybindings {
-		// 	if i == 0 {
-		// keyString := " (" + key.Key + ")"
-		// space := max(h.width-lipgloss.Width(content)-lipgloss.Width(keyString), 0)
-		// spacer := strings.Repeat(" ", space)
-		// content += descStyle.Render(spacer)
-		// content += descStyle.Render(keyString)
-		// 	}
-		// }
-
-		lines = append(lines, contentStyle.Render(content))
-	}
-
-	return strings.Join(lines, "\n")
+	h.commandsComponent.SetBackgroundColor(t.BackgroundElement())
+	return h.viewport.View()
 }
 
 func (h *helpDialog) Render(background string) string {
@@ -80,9 +71,16 @@ type HelpDialog interface {
 	layout.Modal
 }
 
-func NewHelpDialog(commands []commands.Command) HelpDialog {
+func NewHelpDialog(app *app.App) HelpDialog {
+	vp := viewport.New(viewport.WithHeight(12))
 	return &helpDialog{
-		commands: commands,
+		app: app,
+		commandsComponent: commandsComponent.New(app,
+			commandsComponent.WithBackground(theme.CurrentTheme().BackgroundElement()),
+			commandsComponent.WithShowAll(true),
+			commandsComponent.WithKeybinds(true),
+		),
 		modal:    modal.New(modal.WithTitle("Help")),
+		viewport: vp,
 	}
 }

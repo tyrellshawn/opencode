@@ -21,11 +21,16 @@ import { Config } from "./config/config"
 import { NamedError } from "./util/error"
 import { FormatError } from "./cli/error"
 
+const cancel = new AbortController()
+
 const cli = yargs(hideBin(process.argv))
   .scriptName("opencode")
-  .version(Installation.VERSION)
+  .help("help", "show help")
+  .alias("help", "h")
+  .version("version", "show version number", Installation.VERSION)
+  .alias("version", "v")
   .option("print-logs", {
-    describe: "Print logs to stderr",
+    describe: "print logs to stderr",
     type: "boolean",
   })
   .middleware(async () => {
@@ -38,7 +43,7 @@ const cli = yargs(hideBin(process.argv))
   .usage("\n" + UI.logo())
   .command({
     command: "$0 [project]",
-    describe: "start opencode TUI",
+    describe: "start opencode tui",
     builder: (yargs) =>
       yargs.positional("project", {
         type: "string",
@@ -72,6 +77,7 @@ const cli = yargs(hideBin(process.argv))
           }
           const proc = Bun.spawn({
             cmd: [...cmd, ...process.argv.slice(2)],
+            signal: cancel.signal,
             cwd,
             stdout: "inherit",
             stderr: "inherit",
@@ -86,21 +92,21 @@ const cli = yargs(hideBin(process.argv))
             },
           })
 
-          ;(async () => {
-            if (Installation.VERSION === "dev") return
-            if (Installation.isSnapshot()) return
-            const config = await Config.global()
-            if (config.autoupdate === false) return
-            const latest = await Installation.latest()
-            if (Installation.VERSION === latest) return
-            const method = await Installation.method()
-            if (method === "unknown") return
-            await Installation.upgrade(method, latest)
-              .then(() => {
-                Bus.publish(Installation.Event.Updated, { version: latest })
-              })
-              .catch(() => {})
-          })()
+            ; (async () => {
+              if (Installation.VERSION === "dev") return
+              if (Installation.isSnapshot()) return
+              const config = await Config.global()
+              if (config.autoupdate === false) return
+              const latest = await Installation.latest()
+              if (Installation.VERSION === latest) return
+              const method = await Installation.method()
+              if (method === "unknown") return
+              await Installation.upgrade(method, latest)
+                .then(() => {
+                  Bus.publish(Installation.Event.Updated, { version: latest })
+                })
+                .catch(() => { })
+            })()
 
           await proc.exited
           server.stop()
@@ -157,3 +163,5 @@ try {
       "Unexpected error, check log file at " + Log.file() + " for more details",
     )
 }
+
+cancel.abort()
