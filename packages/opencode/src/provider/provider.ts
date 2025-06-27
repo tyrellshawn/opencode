@@ -23,25 +23,25 @@ import { AuthCopilot } from "../auth/copilot"
 import { ModelsDev } from "./models"
 import { NamedError } from "../util/error"
 import { Auth } from "../auth"
-import { TaskTool } from "../tool/task"
 
 export namespace Provider {
   const log = Log.create({ service: "provider" })
 
-  type CustomLoader = (provider: ModelsDev.Provider) => Promise<
-    | {
-        getModel?: (sdk: any, modelID: string) => Promise<any>
-        options: Record<string, any>
-      }
-    | false
-  >
+  type CustomLoader = (
+    provider: ModelsDev.Provider,
+    api?: string,
+  ) => Promise<{
+    autoload: boolean
+    getModel?: (sdk: any, modelID: string) => Promise<any>
+    options?: Record<string, any>
+  }>
 
   type Source = "env" | "config" | "custom" | "api"
 
   const CUSTOM_LOADERS: Record<string, CustomLoader> = {
     async anthropic(provider) {
       const access = await AuthAnthropic.access()
-      if (!access) return false
+      if (!access) return { autoload: false }
       for (const model of Object.values(provider.models)) {
         model.cost = {
           input: 0,
@@ -49,6 +49,7 @@ export namespace Provider {
         }
       }
       return {
+        autoload: true,
         options: {
           apiKey: "",
           async fetch(input: any, init: any) {
@@ -69,9 +70,9 @@ export namespace Provider {
     },
     "github-copilot": async (provider) => {
       const copilot = await AuthCopilot()
-      if (!copilot) return false
+      if (!copilot) return { autoload: false }
       let info = await Auth.get("github-copilot")
-      if (!info || info.type !== "oauth") return false
+      if (!info || info.type !== "oauth") return { autoload: false }
 
       if (provider && provider.models) {
         for (const model of Object.values(provider.models)) {
@@ -83,6 +84,7 @@ export namespace Provider {
       }
 
       return {
+        autoload: true,
         options: {
           apiKey: "",
           async fetch(input: any, init: any) {
@@ -115,6 +117,7 @@ export namespace Provider {
     },
     openai: async () => {
       return {
+        autoload: false,
         async getModel(sdk: any, modelID: string) {
           return sdk.responses(modelID)
         },
@@ -123,7 +126,7 @@ export namespace Provider {
     },
     "amazon-bedrock": async () => {
       if (!process.env["AWS_PROFILE"] && !process.env["AWS_ACCESS_KEY_ID"])
-        return false
+        return { autoload: false }
 
       const region = process.env["AWS_REGION"] ?? "us-east-1"
 
@@ -131,6 +134,7 @@ export namespace Provider {
         await BunProc.install("@aws-sdk/credential-providers")
       )
       return {
+        autoload: true,
         options: {
           region,
           credentialProvider: fromNodeProviderChain(),
@@ -256,8 +260,13 @@ export namespace Provider {
     for (const [providerID, fn] of Object.entries(CUSTOM_LOADERS)) {
       if (disabled.has(providerID)) continue
       const result = await fn(database[providerID])
-      if (result) {
-        mergeProvider(providerID, result.options, "custom", result.getModel)
+      if (result && (result.autoload || providers[providerID])) {
+        mergeProvider(
+          providerID,
+          result.options ?? {},
+          "custom",
+          result.getModel,
+        )
       }
     }
 
@@ -401,7 +410,7 @@ export namespace Provider {
     // MultiEditTool,
     WriteTool,
     TodoWriteTool,
-    TaskTool,
+    // TaskTool,
     TodoReadTool,
   ]
 

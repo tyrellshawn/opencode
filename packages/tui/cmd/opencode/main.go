@@ -49,6 +49,8 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(file, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	slog.SetDefault(logger)
 
+	slog.Debug("TUI launched", "app", appInfo)
+
 	httpClient, err := client.NewClientWithResponses(url)
 	if err != nil {
 		slog.Error("Failed to create client", "error", err)

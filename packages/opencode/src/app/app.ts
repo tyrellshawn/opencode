@@ -2,6 +2,7 @@ import "zod-openapi/extend"
 import { Log } from "../util/log"
 import { Context } from "../util/context"
 import { Filesystem } from "../util/filesystem"
+import { Project } from "../util/project"
 import { Global } from "../global"
 import path from "path"
 import os from "os"
@@ -12,7 +13,9 @@ export namespace App {
 
   export const Info = z
     .object({
+      project: z.string(),
       user: z.string(),
+      hostname: z.string(),
       git: z.boolean(),
       path: z.object({
         config: z.string(),
@@ -46,7 +49,7 @@ export namespace App {
     const data = path.join(
       Global.Path.data,
       "project",
-      git ? git.split(path.sep).filter(Boolean).join("-") : "global",
+      git ? directory(git) : "global",
     )
     const stateFile = Bun.file(path.join(data, APP_JSON))
     const state = (await stateFile.json().catch(() => ({}))) as {
@@ -62,8 +65,13 @@ export namespace App {
       }
     >()
 
+    const root = git ?? input.cwd
+    const project = await Project.getName(root)
+
     const info: Info = {
+      project: project,
       user: os.userInfo().username,
+      hostname: os.hostname(),
       time: {
         initialized: state.initialized,
       },
@@ -72,7 +80,7 @@ export namespace App {
         config: Global.Path.config,
         state: Global.Path.state,
         data,
-        root: git ?? input.cwd,
+        root,
         cwd: input.cwd,
       },
     }
@@ -132,5 +140,13 @@ export namespace App {
         initialized: Date.now(),
       }),
     )
+  }
+
+  function directory(input: string): string {
+    return input
+      .split(path.sep)
+      .filter(Boolean)
+      .join("-")
+      .replace(/[^A-Za-z0-9_]/g, "-")
   }
 }

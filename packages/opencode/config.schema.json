@@ -183,6 +183,9 @@
                 "temperature": {
                   "type": "boolean"
                 },
+                "tool_call": {
+                  "type": "boolean"
+                },
                 "cost": {
                   "type": "object",
                   "properties": {
@@ -199,10 +202,7 @@
                       "type": "number"
                     }
                   },
-                  "required": [
-                    "input",
-                    "output"
-                  ],
+                  "required": ["input", "output"],
                   "additionalProperties": false
                 },
                 "limit": {
@@ -215,14 +215,15 @@
                       "type": "number"
                     }
                   },
-                  "required": [
-                    "context",
-                    "output"
-                  ],
+                  "required": ["context", "output"],
                   "additionalProperties": false
                 },
                 "id": {
                   "type": "string"
+                },
+                "options": {
+                  "type": "object",
+                  "additionalProperties": {}
                 }
               },
               "additionalProperties": false
@@ -233,9 +234,7 @@
             "additionalProperties": {}
           }
         },
-        "required": [
-          "models"
-        ],
+        "required": ["models"],
         "additionalProperties": false
       },
       "description": "Custom provider configurations and model overrides"
@@ -267,10 +266,7 @@
                 "description": "Environment variables to set when running the MCP server"
               }
             },
-            "required": [
-              "type",
-              "command"
-            ],
+            "required": ["type", "command"],
             "additionalProperties": false
           },
           {
@@ -286,15 +282,71 @@
                 "description": "URL of the remote MCP server"
               }
             },
-            "required": [
-              "type",
-              "url"
-            ],
+            "required": ["type", "url"],
             "additionalProperties": false
           }
         ]
       },
       "description": "MCP (Model Context Protocol) server configurations"
+    },
+    "experimental": {
+      "type": "object",
+      "properties": {
+        "hook": {
+          "type": "object",
+          "properties": {
+            "file_edited": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "command": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "environment": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": ["command"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "session_completed": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "command": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "environment": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": ["command"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false,

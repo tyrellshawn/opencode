@@ -1088,13 +1088,17 @@
               },
               {
                 "$ref": "#/components/schemas/UnknownError"
+              },
+              {
+                "$ref": "#/components/schemas/MessageOutputLengthError"
               }
             ],
             "discriminator": {
               "propertyName": "name",
               "mapping": {
                 "ProviderAuthError": "#/components/schemas/ProviderAuthError",
-                "UnknownError": "#/components/schemas/UnknownError"
+                "UnknownError": "#/components/schemas/UnknownError",
+                "MessageOutputLengthError": "#/components/schemas/MessageOutputLengthError"
               }
             }
           },
@@ -1272,6 +1276,22 @@
           "data"
         ]
       },
+      "MessageOutputLengthError": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "const": "MessageOutputLengthError"
+          },
+          "data": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "name",
+          "data"
+        ]
+      },
       "Event.message.part.updated": {
         "type": "object",
         "properties": {
@@ -1420,13 +1440,17 @@
                   },
                   {
                     "$ref": "#/components/schemas/UnknownError"
+                  },
+                  {
+                    "$ref": "#/components/schemas/MessageOutputLengthError"
                   }
                 ],
                 "discriminator": {
                   "propertyName": "name",
                   "mapping": {
                     "ProviderAuthError": "#/components/schemas/ProviderAuthError",
-                    "UnknownError": "#/components/schemas/UnknownError"
+                    "UnknownError": "#/components/schemas/UnknownError",
+                    "MessageOutputLengthError": "#/components/schemas/MessageOutputLengthError"
                   }
                 }
               }
@@ -1441,7 +1465,13 @@
       "App.Info": {
         "type": "object",
         "properties": {
+          "project": {
+            "type": "string"
+          },
           "user": {
+            "type": "string"
+          },
+          "hostname": {
             "type": "string"
           },
           "git": {
@@ -1484,7 +1514,9 @@
           }
         },
         "required": [
+          "project",
           "user",
+          "hostname",
           "git",
           "path",
           "time"
@@ -1644,6 +1676,65 @@
               }
             },
             "description": "MCP (Model Context Protocol) server configurations"
+          },
+          "experimental": {
+            "type": "object",
+            "properties": {
+              "hook": {
+                "type": "object",
+                "properties": {
+                  "file_edited": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "command": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "environment": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "command"
+                        ]
+                      }
+                    }
+                  },
+                  "session_completed": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "command": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "environment": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "command"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "additionalProperties": false

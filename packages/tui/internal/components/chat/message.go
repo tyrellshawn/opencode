@@ -129,15 +129,13 @@ func renderContentBlock(content string, options ...renderingOption) string {
 		option(renderer)
 	}
 
-	style := styles.BaseStyle().
+	style := styles.NewStyle().Foreground(t.TextMuted()).Background(t.BackgroundPanel()).
 		// MarginTop(renderer.marginTop).
 		// MarginBottom(renderer.marginBottom).
 		PaddingTop(renderer.paddingTop).
 		PaddingBottom(renderer.paddingBottom).
 		PaddingLeft(renderer.paddingLeft).
 		PaddingRight(renderer.paddingRight).
-		Background(t.BackgroundPanel()).
-		Foreground(t.TextMuted()).
 		BorderStyle(lipgloss.ThickBorder())
 
 	align := lipgloss.Left
@@ -179,13 +177,13 @@ func renderContentBlock(content string, options ...renderingOption) string {
 		layout.Current.Container.Width,
 		align,
 		content,
-		lipgloss.WithWhitespaceStyle(lipgloss.NewStyle().Background(t.Background())),
+		styles.WhitespaceStyle(t.Background()),
 	)
 	content = lipgloss.PlaceHorizontal(
 		layout.Current.Viewport.Width,
 		lipgloss.Center,
 		content,
-		lipgloss.WithWhitespaceStyle(lipgloss.NewStyle().Background(t.Background())),
+		styles.WhitespaceStyle(t.Background()),
 	)
 	if renderer.marginTop > 0 {
 		for range renderer.marginTop {
@@ -226,13 +224,20 @@ func renderText(message client.MessageInfo, text string, author string) string {
 	textWidth := max(lipgloss.Width(text), lipgloss.Width(info))
 	markdownWidth := min(textWidth, width-padding-4) // -4 for the border and padding
 	if message.Role == client.Assistant {
-		markdownWidth = width - padding - 4 - 2
+		markdownWidth = width - padding - 4 - 3
 	}
-	if message.Role == client.User {
-		text = strings.ReplaceAll(text, "<", "\\<")
-		text = strings.ReplaceAll(text, ">", "\\>")
+	minWidth := max(markdownWidth, (width-4)/2)
+	messageStyle := styles.NewStyle().
+		Width(minWidth).
+		Background(t.BackgroundPanel()).
+		Foreground(t.Text())
+	if textWidth < minWidth {
+		messageStyle = messageStyle.AlignHorizontal(lipgloss.Right)
 	}
-	content := toMarkdown(text, markdownWidth, t.BackgroundPanel())
+	content := messageStyle.Render(text)
+	if message.Role == client.Assistant {
+		content = toMarkdown(text, markdownWidth, t.BackgroundPanel())
+	}
 	content = strings.Join([]string{content, info}, "\n")
 
 	switch message.Role {
@@ -275,9 +280,10 @@ func renderToolInvocation(
 	}
 
 	t := theme.CurrentTheme()
-	style := styles.Muted().
-		Width(outerWidth).
+	style := styles.NewStyle().
+		Foreground(t.TextMuted()).
 		Background(t.BackgroundPanel()).
+		Width(outerWidth).
 		PaddingTop(paddingTop).
 		PaddingBottom(paddingBottom).
 		PaddingLeft(2).
@@ -293,7 +299,9 @@ func renderToolInvocation(
 		if !showDetails {
 			title = "∟ " + title
 			padding := calculatePadding()
-			style := lipgloss.NewStyle().Width(outerWidth - padding - 4).Background(t.BackgroundPanel())
+			style := styles.NewStyle().
+				Background(t.BackgroundPanel()).
+				Width(outerWidth - padding - 4 - 3)
 			return renderContentBlock(style.Render(title),
 				WithAlign(lipgloss.Left),
 				WithBorderColor(t.Accent()),
@@ -334,9 +342,9 @@ func renderToolInvocation(
 	if e, ok := metadata.Get("error"); ok && e.(bool) == true {
 		if m, ok := metadata.Get("message"); ok {
 			style = style.BorderLeftForeground(t.Error())
-			error = styles.BaseStyle().
-				Background(t.BackgroundPanel()).
+			error = styles.NewStyle().
 				Foreground(t.Error()).
+				Background(t.BackgroundPanel()).
 				Render(m.(string))
 			error = renderContentBlock(
 				error,
@@ -374,7 +382,7 @@ func renderToolInvocation(
 					formattedDiff, _ = diff.FormatDiff(filename, patch, diff.WithTotalWidth(diffWidth))
 				}
 				formattedDiff = strings.TrimSpace(formattedDiff)
-				formattedDiff = lipgloss.NewStyle().
+				formattedDiff = styles.NewStyle().
 					BorderStyle(lipgloss.ThickBorder()).
 					BorderBackground(t.Background()).
 					BorderForeground(t.BackgroundPanel()).
@@ -394,8 +402,13 @@ func renderToolInvocation(
 					lipgloss.Center,
 					lipgloss.Top,
 					body,
-					lipgloss.WithWhitespaceStyle(lipgloss.NewStyle().Background(t.Background())),
+					styles.WhitespaceStyle(t.Background()),
 				)
+
+				// Add diagnostics at the bottom if they exist
+				if diagnostics := renderDiagnostics(metadata, filename); diagnostics != "" {
+					body += "\n" + renderContentBlock(diagnostics, WithFullWidth(), WithBorderColor(t.Error()))
+				}
 			}
 		}
 	case "write":
@@ -403,6 +416,11 @@ func renderToolInvocation(
 			title = fmt.Sprintf("WRITE %s", relative(filename))
 			if content, ok := toolArgsMap["content"].(string); ok {
 				body = renderFile(filename, content)
+
+				// Add diagnostics at the bottom if they exist
+				if diagnostics := renderDiagnostics(metadata, filename); diagnostics != "" {
+					body += "\n" + renderContentBlock(diagnostics, WithFullWidth(), WithBorderColor(t.Error()))
+				}
 			}
 		}
 	case "bash":
@@ -506,7 +524,7 @@ func renderToolInvocation(
 	if !showDetails {
 		title = "∟ " + title
 		padding := calculatePadding()
-		style := lipgloss.NewStyle().Width(outerWidth - padding - 4).Background(t.BackgroundPanel())
+		style := styles.NewStyle().Background(t.BackgroundPanel()).Width(outerWidth - padding - 4 - 3)
 		paddingBottom := 0
 		if isLast {
 			paddingBottom = 1
@@ -530,7 +548,7 @@ func renderToolInvocation(
 		layout.Current.Viewport.Width,
 		lipgloss.Center,
 		content,
-		lipgloss.WithWhitespaceStyle(lipgloss.NewStyle().Background(t.Background())),
+		styles.WhitespaceStyle(t.Background()),
 	)
 	if showDetails && body != "" && error == "" {
 		content += "\n" + body
@@ -683,4 +701,82 @@ func extension(path string) string {
 		ext = strings.ToLower(ext[1:])
 	}
 	return ext
+}
+
+// Diagnostic represents an LSP diagnostic
+type Diagnostic struct {
+	Range struct {
+		Start struct {
+			Line      int `json:"line"`
+			Character int `json:"character"`
+		} `json:"start"`
+	} `json:"range"`
+	Severity int    `json:"severity"`
+	Message  string `json:"message"`
+}
+
+// renderDiagnostics formats LSP diagnostics for display in the TUI
+func renderDiagnostics(metadata client.MessageMetadata_Tool_AdditionalProperties, filePath string) string {
+	diagnosticsData, ok := metadata.Get("diagnostics")
+	if !ok {
+		return ""
+	}
+
+	// diagnosticsData should be a map[string][]Diagnostic
+	diagnosticsMap, ok := diagnosticsData.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	fileDiagnostics, ok := diagnosticsMap[filePath]
+	if !ok {
+		return ""
+	}
+
+	diagnosticsList, ok := fileDiagnostics.([]interface{})
+	if !ok {
+		return ""
+	}
+
+	var errorDiagnostics []string
+	for _, diagInterface := range diagnosticsList {
+		diagMap, ok := diagInterface.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Parse the diagnostic
+		var diag Diagnostic
+		diagBytes, err := json.Marshal(diagMap)
+		if err != nil {
+			continue
+		}
+		if err := json.Unmarshal(diagBytes, &diag); err != nil {
+			continue
+		}
+
+		// Only show error diagnostics (severity === 1)
+		if diag.Severity != 1 {
+			continue
+		}
+
+		line := diag.Range.Start.Line + 1        // 1-based
+		column := diag.Range.Start.Character + 1 // 1-based
+		errorDiagnostics = append(errorDiagnostics, fmt.Sprintf("Error [%d:%d] %s", line, column, diag.Message))
+	}
+
+	if len(errorDiagnostics) == 0 {
+		return ""
+	}
+
+	t := theme.CurrentTheme()
+	var result strings.Builder
+	for _, diagnostic := range errorDiagnostics {
+		if result.Len() > 0 {
+			result.WriteString("\n")
+		}
+		result.WriteString(styles.NewStyle().Foreground(t.Error()).Render(diagnostic))
+	}
+
+	return result.String()
 }
