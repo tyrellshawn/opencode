@@ -37,7 +37,11 @@ func (m statusComponent) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m statusComponent) logo() string {
 	t := theme.CurrentTheme()
 	base := styles.NewStyle().Foreground(t.TextMuted()).Background(t.BackgroundElement()).Render
-	emphasis := styles.NewStyle().Foreground(t.Text()).Background(t.BackgroundElement()).Bold(true).Render
+	emphasis := styles.NewStyle().
+		Foreground(t.Text()).
+		Background(t.BackgroundElement()).
+		Bold(true).
+		Render
 
 	open := base("open")
 	code := emphasis("code ")
@@ -48,7 +52,7 @@ func (m statusComponent) logo() string {
 		Render(open + code + version)
 }
 
-func formatTokensAndCost(tokens float32, contextWindow float32, cost float32) string {
+func formatTokensAndCost(tokens float64, contextWindow float64, cost float64) string {
 	// Format tokens in human-readable format (e.g., 110K, 1.2M)
 	var formattedTokens string
 	switch {
@@ -72,19 +76,16 @@ func formatTokensAndCost(tokens float32, contextWindow float32, cost float32) st
 	formattedCost := fmt.Sprintf("$%.2f", cost)
 	percentage := (float64(tokens) / float64(contextWindow)) * 100
 
-	return fmt.Sprintf("Context: %s (%d%%), Cost: %s", formattedTokens, int(percentage), formattedCost)
+	return fmt.Sprintf(
+		"Context: %s (%d%%), Cost: %s",
+		formattedTokens,
+		int(percentage),
+		formattedCost,
+	)
 }
 
 func (m statusComponent) View() string {
 	t := theme.CurrentTheme()
-	if m.app.Session.Id == "" {
-		return styles.NewStyle().
-			Background(t.Background()).
-			Width(m.width).
-			Height(2).
-			Render("")
-	}
-
 	logo := m.logo()
 
 	cwd := styles.NewStyle().
@@ -94,22 +95,24 @@ func (m statusComponent) View() string {
 		Render(m.app.Info.Path.Cwd)
 
 	sessionInfo := ""
-	if m.app.Session.Id != "" {
-		tokens := float32(0)
-		cost := float32(0)
+	if m.app.Session.ID != "" {
+		tokens := float64(0)
+		cost := float64(0)
 		contextWindow := m.app.Model.Limit.Context
 
 		for _, message := range m.app.Messages {
-			if message.Metadata.Assistant != nil {
-				cost += message.Metadata.Assistant.Cost
-				usage := message.Metadata.Assistant.Tokens
-				if usage.Output > 0 {
-					tokens = (usage.Input +
-						usage.Cache.Write +
-						usage.Cache.Read +
-						usage.Output +
-						usage.Reasoning)
+			cost += message.Metadata.Assistant.Cost
+			usage := message.Metadata.Assistant.Tokens
+			if usage.Output > 0 {
+				if message.Metadata.Assistant.Summary {
+					tokens = usage.Output
+					continue
 				}
+				tokens = (usage.Input +
+					usage.Cache.Write +
+					usage.Cache.Read +
+					usage.Output +
+					usage.Reasoning)
 			}
 		}
 

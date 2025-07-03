@@ -5,28 +5,59 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/sst/opencode/pkg/client"
 )
 
+type ModelUsage struct {
+	ProviderID string    `toml:"provider_id"`
+	ModelID    string    `toml:"model_id"`
+	LastUsed   time.Time `toml:"last_used"`
+}
+
 type State struct {
-	Theme    string `toml:"theme"`
-	Provider string `toml:"provider"`
-	Model    string `toml:"model"`
+	Theme              string       `toml:"theme"`
+	Provider           string       `toml:"provider"`
+	Model              string       `toml:"model"`
+	RecentlyUsedModels []ModelUsage `toml:"recently_used_models"`
+	MessagesRight      bool         `toml:"messages_right"`
+	SplitDiff          bool         `toml:"split_diff"`
 }
 
 func NewState() *State {
 	return &State{
-		Theme: "opencode",
+		Theme:              "opencode",
+		RecentlyUsedModels: make([]ModelUsage, 0),
 	}
 }
 
-func MergeState(state *State, config *client.ConfigInfo) *client.ConfigInfo {
-	if config.Theme == nil {
-		config.Theme = &state.Theme
+// UpdateModelUsage updates the recently used models list with the specified model
+func (s *State) UpdateModelUsage(providerID, modelID string) {
+	now := time.Now()
+
+	// Check if this model is already in the list
+	for i, usage := range s.RecentlyUsedModels {
+		if usage.ProviderID == providerID && usage.ModelID == modelID {
+			s.RecentlyUsedModels[i].LastUsed = now
+			usage := s.RecentlyUsedModels[i]
+			copy(s.RecentlyUsedModels[1:i+1], s.RecentlyUsedModels[0:i])
+			s.RecentlyUsedModels[0] = usage
+			return
+		}
 	}
-	return config
+
+	newUsage := ModelUsage{
+		ProviderID: providerID,
+		ModelID:    modelID,
+		LastUsed:   now,
+	}
+
+	// Prepend to slice and limit to last 50 entries
+	s.RecentlyUsedModels = append([]ModelUsage{newUsage}, s.RecentlyUsedModels...)
+	if len(s.RecentlyUsedModels) > 50 {
+		s.RecentlyUsedModels = s.RecentlyUsedModels[:50]
+	}
 }
 
 // SaveState writes the provided Config struct to the specified TOML file.

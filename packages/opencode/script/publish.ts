@@ -40,7 +40,7 @@ for (const [os, arch] of targets) {
   console.log(`building ${os}-${arch}`)
   const name = `${pkg.name}-${os}-${arch}`
   await $`mkdir -p dist/${name}/bin`
-  await $`GOOS=${os} GOARCH=${GOARCH[arch]} go build -ldflags="-s -w -X main.Version=${version}" -o ../opencode/dist/${name}/bin/tui ../tui/cmd/opencode/main.go`.cwd(
+  await $`CGO_ENABLED=0 GOOS=${os} GOARCH=${GOARCH[arch]} go build -ldflags="-s -w -X main.Version=${version}" -o ../opencode/dist/${name}/bin/tui ../tui/cmd/opencode/main.go`.cwd(
     "../tui",
   )
   await $`bun build --define OPENCODE_VERSION="'${version}'" --compile --minify --target=bun-${os}-${arch} --outfile=dist/${name}/bin/opencode ./src/index.ts ./dist/${name}/bin/tui`
@@ -110,6 +110,7 @@ if (!snapshot) {
       return (
         !lower.includes("ignore:") &&
         !lower.includes("ci:") &&
+        !lower.includes("wip:") &&
         !lower.includes("docs:") &&
         !lower.includes("doc:")
       )
@@ -142,7 +143,7 @@ if (!snapshot) {
     "# Maintainer: dax",
     "# Maintainer: adam",
     "",
-    "pkgname='opencode-bin'",
+    "pkgname='${pkg}'",
     `pkgver=${version.split("-")[0]}`,
     "options=('!debug' '!strip')",
     "pkgrel=1",
@@ -166,14 +167,17 @@ if (!snapshot) {
     "",
   ].join("\n")
 
-  await $`rm -rf ./dist/aur-opencode-bin`
-
-  await $`git clone ssh://aur@aur.archlinux.org/opencode-bin.git ./dist/aur-opencode-bin`
-  await Bun.file("./dist/aur-opencode-bin/PKGBUILD").write(pkgbuild)
-  await $`cd ./dist/aur-opencode-bin && makepkg --printsrcinfo > .SRCINFO`
-  await $`cd ./dist/aur-opencode-bin && git add PKGBUILD .SRCINFO`
-  await $`cd ./dist/aur-opencode-bin && git commit -m "Update to v${version}"`
-  if (!dry) await $`cd ./dist/aur-opencode-bin && git push`
+  for (const pkg of ["opencode", "opencode-bin"]) {
+    await $`rm -rf ./dist/aur-${pkg}`
+    await $`git clone ssh://aur@aur.archlinux.org/${pkg}.git ./dist/aur-${pkg}`
+    await Bun.file(`./dist/aur-${pkg}/PKGBUILD`).write(
+      pkgbuild.replace("${pkg}", pkg),
+    )
+    await $`cd ./dist/aur-${pkg} && makepkg --printsrcinfo > .SRCINFO`
+    await $`cd ./dist/aur-${pkg} && git add PKGBUILD .SRCINFO`
+    await $`cd ./dist/aur-${pkg} && git commit -m "Update to v${version}"`
+    if (!dry) await $`cd ./dist/aur-${pkg} && git push`
+  }
 
   // Homebrew formula
   const homebrewFormula = [

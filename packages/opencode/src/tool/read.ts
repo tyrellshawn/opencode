@@ -3,7 +3,7 @@ import * as fs from "fs"
 import * as path from "path"
 import { Tool } from "./tool"
 import { LSP } from "../lsp"
-import { FileTimes } from "./util/file-times"
+import { FileTime } from "../file/time"
 import DESCRIPTION from "./read.txt"
 import { App } from "../app/app"
 
@@ -89,8 +89,8 @@ export const ReadTool = Tool.define({
     output += "\n</file>"
 
     // just warms the lsp client
-    await LSP.touchFile(filePath, true)
-    FileTimes.read(ctx.sessionID, filePath)
+    await LSP.touchFile(filePath, false)
+    FileTime.read(ctx.sessionID, filePath)
 
     return {
       output,

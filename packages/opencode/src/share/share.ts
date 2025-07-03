@@ -1,4 +1,3 @@
-import { App } from "../app/app"
 import { Bus } from "../bus"
 import { Installation } from "../installation"
 import { Session } from "../session"
@@ -10,12 +9,6 @@ export namespace Share {
 
   let queue: Promise<void> = Promise.resolve()
   const pending = new Map<string, any>()
-
-  const state = App.state("share", async () => {
-    Bus.subscribe(Storage.Event.Write, async (payload) => {
-      await sync(payload.properties.key, payload.properties.content)
-    })
-  })
 
   export async function sync(key: string, content: any) {
     const [root, ...splits] = key.split("/")
@@ -52,8 +45,10 @@ export namespace Share {
       })
   }
 
-  export async function init() {
-    await state()
+  export function init() {
+    Bus.subscribe(Storage.Event.Write, async (payload) => {
+      await sync(payload.properties.key, payload.properties.content)
+    })
   }
 
   export const URL =
@@ -71,10 +66,10 @@ export namespace Share {
       .then((x) => x as { url: string; secret: string })
   }
 
-  export async function remove(id: string) {
+  export async function remove(sessionID: string, secret: string) {
     return fetch(`${URL}/share_delete`, {
       method: "POST",
-      body: JSON.stringify({ id }),
+      body: JSON.stringify({ sessionID, secret }),
     }).then((x) => x.json())
   }
 }

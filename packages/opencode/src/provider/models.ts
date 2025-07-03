@@ -10,7 +10,9 @@ export namespace ModelsDev {
 
   export const Model = z
     .object({
+      id: z.string(),
       name: z.string(),
+      release_date: z.string(),
       attachment: z.boolean(),
       reasoning: z.boolean(),
       temperature: z.boolean(),
@@ -25,11 +27,10 @@ export namespace ModelsDev {
         context: z.number(),
         output: z.number(),
       }),
-      id: z.string(),
       options: z.record(z.any()),
     })
     .openapi({
-      ref: "Model.Info",
+      ref: "Model",
     })
   export type Model = z.infer<typeof Model>
 
@@ -43,7 +44,7 @@ export namespace ModelsDev {
       models: z.record(Model),
     })
     .openapi({
-      ref: "Provider.Info",
+      ref: "Provider",
     })
 
   export type Provider = z.infer<typeof Provider>

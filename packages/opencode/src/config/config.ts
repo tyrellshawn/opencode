@@ -22,6 +22,7 @@ export namespace Config {
       }
     }
     log.info("loaded", result)
+
     return result
   })
 
@@ -36,20 +37,28 @@ export namespace Config {
         .record(z.string(), z.string())
         .optional()
         .describe("Environment variables to set when running the MCP server"),
+      enabled: z
+        .boolean()
+        .optional()
+        .describe("Enable or disable the MCP server on startup"),
     })
     .strict()
     .openapi({
-      ref: "Config.McpLocal",
+      ref: "McpLocalConfig",
     })
 
   export const McpRemote = z
     .object({
       type: z.literal("remote").describe("Type of MCP server connection"),
       url: z.string().describe("URL of the remote MCP server"),
+      enabled: z
+        .boolean()
+        .optional()
+        .describe("Enable or disable the MCP server on startup"),
     })
     .strict()
     .openapi({
-      ref: "Config.McpRemote",
+      ref: "McpRemoteConfig",
     })
 
   export const Mcp = z.discriminatedUnion("type", [McpLocal, McpRemote])
@@ -123,7 +132,7 @@ export namespace Config {
     })
     .strict()
     .openapi({
-      ref: "Config.Keybinds",
+      ref: "KeybindsConfig",
     })
   export const Info = z
     .object({
@@ -167,6 +176,10 @@ export namespace Config {
         .record(z.string(), Mcp)
         .optional()
         .describe("MCP (Model Context Protocol) server configurations"),
+      instructions: z
+        .array(z.string())
+        .optional()
+        .describe("Additional instruction files or patterns to include"),
       experimental: z
         .object({
           hook: z
@@ -196,7 +209,7 @@ export namespace Config {
     })
     .strict()
     .openapi({
-      ref: "Config.Info",
+      ref: "Config",
     })
 
   export type Info = z.output<typeof Info>
