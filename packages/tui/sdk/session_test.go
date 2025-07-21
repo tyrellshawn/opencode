@@ -101,7 +101,7 @@ func TestSessionAbort(t *testing.T) {
 	}
 }
 
-func TestSessionChat(t *testing.T) {
+func TestSessionChatWithOptionalParams(t *testing.T) {
 	t.Skip("skipped: tests are disabled for the time being")
 	baseURL := "http://localhost:4010"
 	if envURL, ok := os.LookupEnv("TEST_API_BASE_URL"); ok {
@@ -118,11 +118,19 @@ func TestSessionChat(t *testing.T) {
 		"id",
 		opencode.SessionChatParams{
 			ModelID: opencode.F("modelID"),
-			Parts: opencode.F([]opencode.MessagePartUnionParam{opencode.TextPartParam{
-				Text: opencode.F("text"),
-				Type: opencode.F(opencode.TextPartTypeText),
+			Parts: opencode.F([]opencode.SessionChatParamsPartUnion{opencode.TextPartInputParam{
+				Text:      opencode.F("text"),
+				Type:      opencode.F(opencode.TextPartInputTypeText),
+				ID:        opencode.F("id"),
+				Synthetic: opencode.F(true),
+				Time: opencode.F(opencode.TextPartInputTimeParam{
+					Start: opencode.F(0.000000),
+					End:   opencode.F(0.000000),
+				}),
 			}}),
 			ProviderID: opencode.F("providerID"),
+			MessageID:  opencode.F("msg"),
+			Mode:       opencode.F("mode"),
 		},
 	)
 	if err != nil {
@@ -150,6 +158,7 @@ func TestSessionInit(t *testing.T) {
 		context.TODO(),
 		"id",
 		opencode.SessionInitParams{
+			MessageID:  opencode.F("messageID"),
 			ModelID:    opencode.F("modelID"),
 			ProviderID: opencode.F("providerID"),
 		},

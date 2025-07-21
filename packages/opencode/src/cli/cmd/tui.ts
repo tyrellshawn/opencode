@@ -9,15 +9,33 @@ import fs from "fs/promises"
 import { Installation } from "../../installation"
 import { Config } from "../../config/config"
 import { Bus } from "../../bus"
+import { Log } from "../../util/log"
+import { FileWatcher } from "../../file/watch"
+import { Mode } from "../../session/mode"
 
 export const TuiCommand = cmd({
   command: "$0 [project]",
   describe: "start opencode tui",
   builder: (yargs) =>
-    yargs.positional("project", {
-      type: "string",
-      describe: "path to start opencode in",
-    }),
+    yargs
+      .positional("project", {
+        type: "string",
+        describe: "path to start opencode in",
+      })
+      .option("model", {
+        type: "string",
+        alias: ["m"],
+        describe: "model to use in the format of provider/model",
+      })
+      .option("prompt", {
+        alias: ["p"],
+        type: "string",
+        describe: "prompt to use",
+      })
+      .option("mode", {
+        type: "string",
+        describe: "mode to use",
+      }),
   handler: async (args) => {
     while (true) {
       const cwd = args.project ? path.resolve(args.project) : process.cwd()
@@ -28,6 +46,7 @@ export const TuiCommand = cmd({
         return
       }
       const result = await bootstrap({ cwd }, async (app) => {
+        FileWatcher.init()
         const providers = await Provider.list()
         if (Object.keys(providers).length === 0) {
           return "needs_provider"
@@ -39,9 +58,7 @@ export const TuiCommand = cmd({
         })
 
         let cmd = ["go", "run", "./main.go"]
-        let cwd = Bun.fileURLToPath(
-          new URL("../../../../tui/cmd/opencode", import.meta.url),
-        )
+        let cwd = Bun.fileURLToPath(new URL("../../../../tui/cmd/opencode", import.meta.url))
         if (Bun.embeddedFiles.length > 0) {
           const blob = Bun.embeddedFiles[0] as File
           let binaryName = blob.name
@@ -57,16 +74,26 @@ export const TuiCommand = cmd({
           cwd = process.cwd()
           cmd = [binary]
         }
+        Log.Default.info("tui", {
+          cmd,
+        })
         const proc = Bun.spawn({
-          cmd: [...cmd, ...process.argv.slice(2)],
+          cmd: [
+            ...cmd,
+            ...(args.model ? ["--model", args.model] : []),
+            ...(args.prompt ? ["--prompt", args.prompt] : []),
+            ...(args.mode ? ["--mode", args.mode] : []),
+          ],
           cwd,
           stdout: "inherit",
           stderr: "inherit",
           stdin: "inherit",
           env: {
             ...process.env,
+            CGO_ENABLED: "0",
             OPENCODE_SERVER: server.url.toString(),
             OPENCODE_APP_INFO: JSON.stringify(app),
+            OPENCODE_MODES: JSON.stringify(await Mode.list()),
           },
           onExit: () => {
             server.stop()
