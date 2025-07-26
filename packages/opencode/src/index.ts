@@ -5,6 +5,7 @@ import { RunCommand } from "./cli/cmd/run"
 import { GenerateCommand } from "./cli/cmd/generate"
 import { Log } from "./util/log"
 import { AuthCommand } from "./cli/cmd/auth"
+import { AgentCommand } from "./cli/cmd/agent"
 import { UpgradeCommand } from "./cli/cmd/upgrade"
 import { ModelsCommand } from "./cli/cmd/models"
 import { UI } from "./cli/ui"
@@ -14,6 +15,12 @@ import { FormatError } from "./cli/error"
 import { ServeCommand } from "./cli/cmd/serve"
 import { TuiCommand } from "./cli/cmd/tui"
 import { DebugCommand } from "./cli/cmd/debug"
+import { StatsCommand } from "./cli/cmd/stats"
+import { McpCommand } from "./cli/cmd/mcp"
+import { GithubCommand } from "./cli/cmd/github"
+import { Trace } from "./trace"
+
+Trace.init()
 
 const cancel = new AbortController()
 
@@ -38,27 +45,42 @@ const cli = yargs(hideBin(process.argv))
     describe: "print logs to stderr",
     type: "boolean",
   })
-  .middleware(async () => {
-    await Log.init({ print: process.argv.includes("--print-logs") })
+  .option("log-level", {
+    describe: "log level",
+    type: "string",
+    choices: ["DEBUG", "INFO", "WARN", "ERROR"],
+  })
+  .middleware(async (opts) => {
+    await Log.init({
+      print: process.argv.includes("--print-logs"),
+      dev: Installation.isDev(),
+      level: (() => {
+        if (opts.logLevel) return opts.logLevel as Log.Level
+        if (Installation.isDev()) return "DEBUG"
+        return "INFO"
+      })(),
+    })
+
     Log.Default.info("opencode", {
       version: Installation.VERSION,
       args: process.argv.slice(2),
     })
   })
   .usage("\n" + UI.logo())
+  .command(McpCommand)
   .command(TuiCommand)
   .command(RunCommand)
   .command(GenerateCommand)
   .command(DebugCommand)
   .command(AuthCommand)
+  .command(AgentCommand)
   .command(UpgradeCommand)
   .command(ServeCommand)
   .command(ModelsCommand)
+  .command(StatsCommand)
+  .command(GithubCommand)
   .fail((msg) => {
-    if (
-      msg.startsWith("Unknown argument") ||
-      msg.startsWith("Not enough non-option arguments")
-    ) {
+    if (msg.startsWith("Unknown argument") || msg.startsWith("Not enough non-option arguments")) {
       cli.showHelp("log")
     }
   })
@@ -97,10 +119,7 @@ try {
   Log.Default.error("fatal", data)
   const formatted = FormatError(e)
   if (formatted) UI.error(formatted)
-  if (formatted === undefined)
-    UI.error(
-      "Unexpected error, check log file at " + Log.file() + " for more details",
-    )
+  if (formatted === undefined) UI.error("Unexpected error, check log file at " + Log.file() + " for more details")
   process.exitCode = 1
 }
 

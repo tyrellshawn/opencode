@@ -5,8 +5,7 @@ import { App } from "../app/app"
 import DESCRIPTION from "./glob.txt"
 import { Ripgrep } from "../file/ripgrep"
 
-export const GlobTool = Tool.define({
-  id: "glob",
+export const GlobTool = Tool.define("glob", {
   description: DESCRIPTION,
   parameters: z.object({
     pattern: z.string().describe("The glob pattern to match files against"),
@@ -20,16 +19,14 @@ export const GlobTool = Tool.define({
   async execute(params) {
     const app = App.info()
     let search = params.path ?? app.path.cwd
-    search = path.isAbsolute(search)
-      ? search
-      : path.resolve(app.path.cwd, search)
+    search = path.isAbsolute(search) ? search : path.resolve(app.path.cwd, search)
 
     const limit = 100
     const files = []
     let truncated = false
     for (const file of await Ripgrep.files({
       cwd: search,
-      glob: params.pattern,
+      glob: [params.pattern],
     })) {
       if (files.length >= limit) {
         truncated = true
@@ -53,17 +50,15 @@ export const GlobTool = Tool.define({
       output.push(...files.map((f) => f.path))
       if (truncated) {
         output.push("")
-        output.push(
-          "(Results are truncated. Consider using a more specific path or pattern.)",
-        )
+        output.push("(Results are truncated. Consider using a more specific path or pattern.)")
       }
     }
 
     return {
+      title: path.relative(app.path.root, search),
       metadata: {
         count: files.length,
         truncated,
-        title: path.relative(app.path.root, search),
       },
       output: output.join("\n"),
     }

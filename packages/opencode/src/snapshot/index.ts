@@ -1,85 +1,101 @@
 import { App } from "../app/app"
-import {
-  add,
-  commit,
-  init,
-  checkout,
-  statusMatrix,
-  remove,
-} from "isomorphic-git"
+import { $ } from "bun"
 import path from "path"
-import fs from "fs"
-import { Ripgrep } from "../file/ripgrep"
+import fs from "fs/promises"
 import { Log } from "../util/log"
+import { Global } from "../global"
+import { z } from "zod"
 
 export namespace Snapshot {
   const log = Log.create({ service: "snapshot" })
 
-  export async function create(sessionID: string) {
+  export function init() {
+    Array.fromAsync(
+      new Bun.Glob("**/snapshot").scan({
+        absolute: true,
+        onlyFiles: false,
+        cwd: Global.Path.data,
+      }),
+    ).then((files) => {
+      for (const file of files) {
+        fs.rmdir(file, { recursive: true })
+      }
+    })
+  }
+
+  export async function track() {
     const app = App.info()
-    const git = gitdir(sessionID)
-    const files = await Ripgrep.files({
-      cwd: app.path.cwd,
-      limit: app.git ? undefined : 1000,
-    })
-    // not a git repo and too big to snapshot
-    if (!app.git && files.length === 1000) return
-    await init({
-      dir: app.path.cwd,
-      gitdir: git,
-      fs,
-    })
-    const status = await statusMatrix({
-      fs,
-      gitdir: git,
-      dir: app.path.cwd,
-    })
-    await add({
-      fs,
-      gitdir: git,
-      parallel: true,
-      dir: app.path.cwd,
-      filepath: files,
-    })
-    for (const [file, _head, workdir, stage] of status) {
-      if (workdir === 0 && stage === 1) {
-        log.info("remove", { file })
-        await remove({
-          fs,
-          gitdir: git,
-          dir: app.path.cwd,
-          filepath: file,
+    if (!app.git) return
+    const git = gitdir()
+    if (await fs.mkdir(git, { recursive: true })) {
+      await $`git init`
+        .env({
+          ...process.env,
+          GIT_DIR: git,
+          GIT_WORK_TREE: app.path.root,
         })
+        .quiet()
+        .nothrow()
+      log.info("initialized")
+    }
+    await $`git --git-dir ${git} add .`.quiet().cwd(app.path.cwd).nothrow()
+    const hash = await $`git --git-dir ${git} write-tree`.quiet().cwd(app.path.cwd).text()
+    return hash.trim()
+  }
+
+  export const Patch = z.object({
+    hash: z.string(),
+    files: z.string().array(),
+  })
+  export type Patch = z.infer<typeof Patch>
+
+  export async function patch(hash: string): Promise<Patch> {
+    const app = App.info()
+    const git = gitdir()
+    await $`git --git-dir ${git} add .`.quiet().cwd(app.path.cwd).nothrow()
+    const files = await $`git --git-dir ${git} diff --name-only ${hash} -- .`.cwd(app.path.cwd).text()
+    return {
+      hash,
+      files: files
+        .trim()
+        .split("\n")
+        .map((x) => x.trim())
+        .filter(Boolean)
+        .map((x) => path.join(app.path.cwd, x)),
+    }
+  }
+
+  export async function restore(snapshot: string) {
+    log.info("restore", { commit: snapshot })
+    const app = App.info()
+    const git = gitdir()
+    await $`git --git-dir=${git} read-tree ${snapshot} && git --git-dir=${git} checkout-index -a -f`
+      .quiet()
+      .cwd(app.path.root)
+  }
+
+  export async function revert(patches: Patch[]) {
+    const files = new Set<string>()
+    const git = gitdir()
+    for (const item of patches) {
+      for (const file of item.files) {
+        if (files.has(file)) continue
+        log.info("reverting", { file, hash: item.hash })
+        const result = await $`git --git-dir=${git} checkout ${item.hash} -- ${file}`
+          .quiet()
+          .cwd(App.info().path.root)
+          .nothrow()
+        if (result.exitCode !== 0) {
+          log.info("file not found in history, deleting", { file })
+          await fs.unlink(file).catch(() => {})
+        }
+        files.add(file)
       }
     }
-    const result = await commit({
-      fs,
-      gitdir: git,
-      dir: app.path.cwd,
-      message: "snapshot",
-      author: {
-        name: "opencode",
-        email: "mail@opencode.ai",
-      },
-    })
-    log.info("commit", { result })
-    return result
   }
 
-  export async function restore(sessionID: string, commit: string) {
-    log.info("restore", { commit })
+  function gitdir() {
     const app = App.info()
-    await checkout({
-      fs,
-      gitdir: gitdir(sessionID),
-      dir: app.path.cwd,
-      ref: commit,
-      force: true,
-    })
-  }
-
-  function gitdir(sessionID: string) {
-    const app = App.info()
-    return path.join(app.path.data, "snapshot", sessionID)
+    return path.join(app.path.data, "snapshots")
   }
 }

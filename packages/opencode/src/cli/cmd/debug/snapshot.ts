@@ -4,36 +4,30 @@ import { cmd } from "../cmd"
 
 export const SnapshotCommand = cmd({
   command: "snapshot",
-  builder: (yargs) =>
-    yargs
-      .command(SnapshotCreateCommand)
-      .command(SnapshotRestoreCommand)
-      .demandCommand(),
+  builder: (yargs) => yargs.command(TrackCommand).command(PatchCommand).demandCommand(),
   async handler() {},
 })
 
-export const SnapshotCreateCommand = cmd({
-  command: "create",
+const TrackCommand = cmd({
+  command: "track",
   async handler() {
     await bootstrap({ cwd: process.cwd() }, async () => {
-      const result = await Snapshot.create("test")
-      console.log(result)
+      console.log(await Snapshot.track())
     })
   },
 })
 
-export const SnapshotRestoreCommand = cmd({
-  command: "restore <commit>",
+const PatchCommand = cmd({
+  command: "patch <hash>",
   builder: (yargs) =>
-    yargs.positional("commit", {
+    yargs.positional("hash", {
       type: "string",
-      description: "commit",
+      description: "hash",
       demandOption: true,
     }),
   async handler(args) {
     await bootstrap({ cwd: process.cwd() }, async () => {
-      await Snapshot.restore("test", args.commit)
-      console.log("restored")
+      console.log(await Snapshot.patch(args.hash))
     })
   },
 })
