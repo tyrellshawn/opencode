@@ -156,21 +156,23 @@ export const GithubInstallCommand = cmd({
           step2 =
             "Configure OIDC in AWS - https://docs.github.com/en/actions/how-tos/security-for-github-actions/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services"
         } else {
-          const url = `https://github.com/organizations/${app.owner}/settings/secrets/actions`
-          const env = providers[provider].env
-          const envStr =
-            env.length === 1
-              ? `\`${env[0]}\` secret`
-              : `\`${[env.slice(0, -1).join("\`, \`"), ...env.slice(-1)].join("\` and \`")}\` secrets`
-          step2 = `Add ${envStr} for ${providers[provider].name} - ${url}`
+          step2 = [
+            `    2. Add the following secrets in org or repo (${app.owner}/${app.repo}) settings`,
+            "",
+            ...providers[provider].env.map((e) => `       - ${e}`),
+          ].join("\n")
         }
 
         prompts.outro(
           [
             "Next steps:",
-            `    1. Commit "${WORKFLOW_FILE}" file and push`,
-            `    2. ${step2}`,
-            "    3. Learn how to use the GitHub agent - https://docs.opencode.ai/docs/github/getting-started",
+            "",
+            `    1. Commit the \`${WORKFLOW_FILE}\` file and push`,
+            step2,
+            "",
+            "    3. Go to a GitHub issue and comment `/oc summarize` to see the agent in action",
+            "",
+            "   Learn more about the GitHub agent - https://opencode.ai/docs/github/#usage-examples",
           ].join("\n"),
         )
       }
@@ -316,18 +318,15 @@ on:
 jobs:
   opencode:
     if: |
-      startsWith(github.event.comment.body, 'opencode') ||
-      startsWith(github.event.comment.body, 'hi opencode') ||
-      startsWith(github.event.comment.body, 'hey opencode') ||
-      contains(github.event.comment.body, '@opencode-agent')
+      contains(github.event.comment.body, '/oc') ||
+      contains(github.event.comment.body, '/opencode')
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       id-token: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
 
       - name: Run opencode
         uses: sst/opencode/github@latest${envStr}
@@ -459,8 +458,9 @@ export const GithubRunCommand = cmd({
               `${response}\n\nCloses #${issueId}${footer({ image: true })}`,
             )
             await updateComment(`Created PR #${pr}${footer({ image: true })}`)
+          } else {
+            await updateComment(`${response}${footer({ image: true })}`)
           }
-          await updateComment(`${response}${footer({ image: true })}`)
         }
       } catch (e: any) {
         exitCode = 1
@@ -508,16 +508,10 @@ export const GithubRunCommand = cmd({
 
       async function getUserPrompt() {
         let prompt = (() => {
-          const body = payload.comment.body
-          if (body.match("@opencode-agent")) return body
-
-          const match = body.match(/^(?:hey|hi)?\s*opencode(?:-agent)?,?\s*(.*)$/is)
-          if (match?.[1] === undefined)
-            throw new Error(
-              "Command must mention @opencode-agent, or start with `opencode`, `hi opencode`, or `hey opencode` followed by instructions",
-            )
-          if (match[1] === "") return "Summarize this thread"
-          return match[1]
+          const body = payload.comment.body.trim()
+          if (body === "/opencode" || body === "/oc") return "Summarize this thread"
+          if (body.includes("/opencode") || body.includes("/oc")) return body
+          throw new Error("Comments must mention `/opencode` or `/oc`")
         })()
 
         // Handle images
