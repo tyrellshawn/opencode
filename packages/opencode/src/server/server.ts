@@ -3,6 +3,8 @@ import { Bus } from "../bus"
 import { describeRoute, generateSpecs, openAPISpecs } from "hono-openapi"
 import { Hono } from "hono"
 import { streamSSE } from "hono/streaming"
+import { readFileSync } from "fs"
+import { join } from "path"
 import { Session } from "../session"
 import { resolver, validator as zValidator } from "hono-openapi/zod"
 import { z } from "zod"
@@ -71,6 +73,15 @@ export namespace Server {
           log.info("response", {
             duration: Date.now() - start,
           })
+        }
+      })
+      .get("/", async (c) => {
+        try {
+          const htmlPath = join(import.meta.dir, "static", "index.html")
+          const html = readFileSync(htmlPath, "utf-8")
+          return c.html(html)
+        } catch (error) {
+          return c.text("opencode server is running", 200)
         }
       })
       .get(
