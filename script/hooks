@@ -1,15 +1,15 @@
 #!/bin/sh
 
-if [ ! -d ".git" ]; then
-    exit 0
-fi
+# if [ ! -d ".git" ]; then
+#     exit 0
+# fi
 
-mkdir -p .git/hooks
+# mkdir -p .git/hooks
 
-cat > .git/hooks/pre-push << 'EOF'
-#!/bin/sh
-bun run typecheck
-EOF
+# cat > .git/hooks/pre-push << 'EOF'
+# #!/bin/sh
+# bun run typecheck
+# EOF
 
-chmod +x .git/hooks/pre-push
-echo "✅ Pre-push hook installed"
+# chmod +x .git/hooks/pre-push
+# echo "✅ Pre-push hook installed"
