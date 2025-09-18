@@ -10,12 +10,11 @@ import { Installation } from "../../installation"
 import { Config } from "../../config/config"
 import { Bus } from "../../bus"
 import { Log } from "../../util/log"
-import { FileWatcher } from "../../file/watch"
+import { FileWatcher } from "../../file/watcher"
 import { Ide } from "../../ide"
 
 import { Flag } from "../../flag/flag"
 import { Session } from "../../session"
-import { Instance } from "../../project/instance"
 import { $ } from "bun"
 
 declare global {
@@ -101,7 +100,6 @@ export const TuiCommand = cmd({
           }
           return undefined
         })()
-        FileWatcher.init()
         const providers = await Provider.list()
         if (Object.keys(providers).length === 0) {
           return "needs_provider"
@@ -123,14 +121,15 @@ export const TuiCommand = cmd({
           const file = Bun.file(binary)
           if (!(await file.exists())) {
             await Bun.write(file, tui, { mode: 0o755 })
-            await fs.chmod(binary, 0o755)
+            if (process.platform !== "win32") await fs.chmod(binary, 0o755)
           }
           cmd = [binary]
         }
         if (!tui) {
           const dir = Bun.fileURLToPath(new URL("../../../../tui/cmd/opencode", import.meta.url))
-          await $`go build -o ./dist/tui ./main.go`.cwd(dir)
-          cmd = [path.join(dir, "dist/tui")]
+          let binaryName = `./dist/tui${process.platform === "win32" ? ".exe" : ""}`
+          await $`go build -o ${binaryName} ./main.go`.cwd(dir)
+          cmd = [path.join(dir, binaryName)]
         }
         Log.Default.info("tui", {
           cmd,
@@ -151,7 +150,6 @@ export const TuiCommand = cmd({
             ...process.env,
             CGO_ENABLED: "0",
             OPENCODE_SERVER: server.url.toString(),
-            OPENCODE_PROJECT: JSON.stringify(Instance.project),
           },
           onExit: () => {
             server.stop()
@@ -180,6 +178,7 @@ export const TuiCommand = cmd({
             .then(() => Bus.publish(Ide.Event.Installed, { ide }))
             .catch(() => {})
         })()
+        FileWatcher.init()
 
         await proc.exited
         server.stop()
