@@ -1,8 +1,4 @@
-export const domain = (() => {
-  if ($app.stage === "production") return "opencode.ai"
-  if ($app.stage === "dev") return "dev.opencode.ai"
-  return `${$app.stage}.dev.opencode.ai`
-})()
+import { domain } from "./stage"
 
 const GITHUB_APP_ID = new sst.Secret("GITHUB_APP_ID")
 const GITHUB_APP_PRIVATE_KEY = new sst.Secret("GITHUB_APP_PRIVATE_KEY")
@@ -29,8 +25,8 @@ export const api = new sst.cloudflare.Worker("Api", {
       ])
       args.migrations = {
         // Note: when releasing the next tag, make sure all stages use tag v2
-        oldTag: $app.stage === "production" ? "" : "v1",
-        newTag: $app.stage === "production" ? "" : "v1",
+        oldTag: $app.stage === "production" || $app.stage === "thdxr" ? "" : "v1",
+        newTag: $app.stage === "production" || $app.stage === "thdxr" ? "" : "v1",
         //newSqliteClasses: ["SyncServer"],
       }
     },
@@ -38,11 +34,11 @@ export const api = new sst.cloudflare.Worker("Api", {
 })
 
 new sst.cloudflare.x.Astro("Web", {
-  domain,
+  domain: "docs." + domain,
   path: "packages/web",
   environment: {
     // For astro config
     SST_STAGE: $app.stage,
-    VITE_API_URL: api.url,
+    VITE_API_URL: api.url.apply((url) => url!),
   },
 })

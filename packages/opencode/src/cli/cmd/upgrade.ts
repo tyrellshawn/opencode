@@ -32,7 +32,7 @@ export const UpgradeCommand = {
       return
     }
     prompts.log.info("Using method: " + method)
-    const target = args.target ?? (await Installation.latest())
+    const target = args.target ? args.target.replace(/^v/, "") : await Installation.latest()
 
     if (Installation.VERSION === target) {
       prompts.log.warn(`opencode upgrade skipped: ${target} is already installed`)
@@ -45,7 +45,7 @@ export const UpgradeCommand = {
     spinner.start("Upgrading...")
     const err = await Installation.upgrade(method, target).catch((err) => err)
     if (err) {
-      spinner.stop("Upgrade failed")
+      spinner.stop("Upgrade failed", 1)
       if (err instanceof Installation.UpgradeFailedError) prompts.log.error(err.data.stderr)
       else if (err instanceof Error) prompts.log.error(err.message)
       prompts.outro("Done")

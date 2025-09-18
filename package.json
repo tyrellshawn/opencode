@@ -3,27 +3,38 @@
   "name": "opencode",
   "private": true,
   "type": "module",
-  "packageManager": "bun@1.2.14",
+  "packageManager": "bun@1.2.21",
   "scripts": {
-    "dev": "bun run packages/opencode/src/index.ts",
+    "dev": "bun run --conditions=development packages/opencode/src/index.ts",
     "typecheck": "bun run --filter='*' typecheck",
-    "stainless": "./scripts/stainless",
-    "postinstall": "./scripts/hooks"
+    "generate": "(cd packages/sdk && ./js/script/generate.ts) && (cd packages/sdk/stainless && ./generate.ts)",
+    "postinstall": "./script/hooks"
   },
   "workspaces": {
     "packages": [
-      "packages/*"
+      "cloud/*",
+      "packages/*",
+      "packages/sdk/js"
     ],
     "catalog": {
-      "typescript": "5.8.2",
+      "@types/bun": "1.2.21",
+      "@hono/zod-validator": "0.4.2",
       "@types/node": "22.13.9",
-      "zod": "3.25.49",
-      "ai": "5.0.0-beta.21"
+      "@tsconfig/node22": "22.0.2",
+      "ai": "5.0.8",
+      "hono": "4.7.10",
+      "typescript": "5.8.2",
+      "zod": "3.25.76",
+      "remeda": "2.26.0",
+      "solid-js": "1.9.9"
     }
+  },
+  "dependencies": {
+    "pulumi-stripe": "0.0.24"
   },
   "devDependencies": {
     "prettier": "3.5.3",
-    "sst": "3.17.8"
+    "sst": "3.17.13"
   },
   "repository": {
     "type": "git",
@@ -37,10 +48,15 @@
   "trustedDependencies": [
     "esbuild",
     "protobufjs",
-    "sharp"
+    "sharp",
+    "tree-sitter",
+    "tree-sitter-bash",
+    "web-tree-sitter"
   ],
-  "patchedDependencies": {},
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "1.16.0"
+  "overrides": {
+    "zod": "3.25.76"
+  },
+  "patchedDependencies": {
+    "@solidjs/start@1.1.7": "patches/@solidjs%2Fstart@1.1.7.patch"
   }
 }

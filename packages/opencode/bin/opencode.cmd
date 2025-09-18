@@ -11,7 +11,7 @@ set "script_dir=%~dp0"
 set "script_dir=%script_dir:~0,-1%"
 
 rem Detect platform and architecture
-set "platform=win32"
+set "platform=windows"
 
 rem Detect architecture
 if "%PROCESSOR_ARCHITECTURE%"=="AMD64" (
@@ -52,5 +52,7 @@ echo It seems that your package manager failed to install the right version of t
 exit /b 1
 
 :execute
-rem Execute the binary with all arguments
-"%resolved%" %*
+rem Execute the binary with all arguments in the same console window
+rem Use start /b /wait to ensure it runs in the current shell context for all shells
+start /b /wait "" "%resolved%" %*
+exit /b %ERRORLEVEL%

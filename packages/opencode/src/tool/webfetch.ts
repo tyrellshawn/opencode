@@ -2,6 +2,8 @@ import { z } from "zod"
 import { Tool } from "./tool"
 import TurndownService from "turndown"
 import DESCRIPTION from "./webfetch.txt"
+import { Config } from "../config/config"
+import { Permission } from "../permission"
 
 const MAX_RESPONSE_SIZE = 5 * 1024 * 1024 // 5MB
 const DEFAULT_TIMEOUT = 30 * 1000 // 30 seconds
@@ -14,18 +16,29 @@ export const WebFetchTool = Tool.define("webfetch", {
     format: z
       .enum(["text", "markdown", "html"])
       .describe("The format to return the content in (text, markdown, or html)"),
-    timeout: z
-      .number()
-      .min(0)
-      .max(MAX_TIMEOUT / 1000)
-      .describe("Optional timeout in seconds (max 120)")
-      .optional(),
+    timeout: z.number().describe("Optional timeout in seconds (max 120)").optional(),
   }),
   async execute(params, ctx) {
     // Validate URL
     if (!params.url.startsWith("http://") && !params.url.startsWith("https://")) {
       throw new Error("URL must start with http:// or https://")
     }
+
+    const cfg = await Config.get()
+    if (cfg.permission?.webfetch === "ask")
+      await Permission.ask({
+        type: "webfetch",
+        pattern: params.url,
+        sessionID: ctx.sessionID,
+        messageID: ctx.messageID,
+        callID: ctx.callID,
+        title: "Fetch content from: " + params.url,
+        metadata: {
+          url: params.url,
+          format: params.format,
+          timeout: params.timeout,
+        },
+      })
 
     const timeout = Math.min((params.timeout ?? DEFAULT_TIMEOUT / 1000) * 1000, MAX_TIMEOUT)
 

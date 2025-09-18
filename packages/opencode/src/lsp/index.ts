@@ -1,9 +1,11 @@
-import { App } from "../app/app"
 import { Log } from "../util/log"
 import { LSPClient } from "./client"
 import path from "path"
 import { LSPServer } from "./server"
 import { z } from "zod"
+import { Config } from "../config/config"
+import { spawn } from "child_process"
+import { Instance } from "../project/instance"
 
 export namespace LSP {
   const log = Log.create({ service: "lsp" })
@@ -51,12 +53,50 @@ export namespace LSP {
     })
   export type DocumentSymbol = z.infer<typeof DocumentSymbol>
 
-  const state = App.state(
-    "lsp",
+  const state = Instance.state(
     async () => {
       const clients: LSPClient.Info[] = []
+      const servers: Record<string, LSPServer.Info> = {}
+      for (const server of Object.values(LSPServer)) {
+        servers[server.id] = server
+      }
+      const cfg = await Config.get()
+      for (const [name, item] of Object.entries(cfg.lsp ?? {})) {
+        const existing = servers[name]
+        if (item.disabled) {
+          log.info(`LSP server ${name} is disabled`)
+          delete servers[name]
+          continue
+        }
+        servers[name] = {
+          ...existing,
+          id: name,
+          root: existing?.root ?? (async () => Instance.directory),
+          extensions: item.extensions ?? existing.extensions,
+          spawn: async (root) => {
+            return {
+              process: spawn(item.command[0], item.command.slice(1), {
+                cwd: root,
+                env: {
+                  ...process.env,
+                  ...item.env,
+                },
+              }),
+              initialization: item.initialization,
+            }
+          },
+        }
+      }
+
+      log.info("enabled LSP servers", {
+        serverIds: Object.values(servers)
+          .map((server) => server.id)
+          .join(", "),
+      })
+
       return {
         broken: new Set<string>(),
+        servers,
         clients,
       }
     },
@@ -75,9 +115,9 @@ export namespace LSP {
     const s = await state()
     const extension = path.parse(file).ext
     const result: LSPClient.Info[] = []
-    for (const server of Object.values(LSPServer)) {
-      if (!server.extensions.includes(extension)) continue
-      const root = await server.root(file, App.info())
+    for (const server of Object.values(s.servers)) {
+      if (server.extensions.length && !server.extensions.includes(extension)) continue
+      const root = await server.root(file)
       if (!root) continue
       if (s.broken.has(root + server.id)) continue
 
@@ -86,7 +126,11 @@ export namespace LSP {
         result.push(match)
         continue
       }
-      const handle = await server.spawn(App.info(), root)
+      const handle = await server.spawn(root).catch((err) => {
+        s.broken.add(root + server.id)
+        log.error(`Failed to spawn LSP server ${server.id}`, { error: err })
+        return undefined
+      })
       if (!handle) continue
       const client = await LSPClient.create({
         serverID: server.id,
@@ -95,7 +139,8 @@ export namespace LSP {
       }).catch((err) => {
         s.broken.add(root + server.id)
         handle.process.kill()
-        log.error("", { error: err })
+        log.error(`Failed to initialize LSP client ${server.id}`, { error: err })
+        return undefined
       })
       if (!client) continue
       s.clients.push(client)

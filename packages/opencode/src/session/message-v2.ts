@@ -52,6 +52,7 @@ export namespace MessageV2 {
       time: z.object({
         start: z.number(),
         end: z.number(),
+        compacted: z.number().optional(),
       }),
     })
     .openapi({
@@ -64,6 +65,7 @@ export namespace MessageV2 {
       status: z.literal("error"),
       input: z.record(z.any()),
       error: z.string(),
+      metadata: z.record(z.any()).optional(),
       time: z.object({
         start: z.number(),
         end: z.number(),
@@ -117,6 +119,19 @@ export namespace MessageV2 {
     ref: "TextPart",
   })
   export type TextPart = z.infer<typeof TextPart>
+
+  export const ReasoningPart = PartBase.extend({
+    type: z.literal("reasoning"),
+    text: z.string(),
+    metadata: z.record(z.any()).optional(),
+    time: z.object({
+      start: z.number(),
+      end: z.number().optional(),
+    }),
+  }).openapi({
+    ref: "ReasoningPart",
+  })
+  export type ReasoningPart = z.infer<typeof ReasoningPart>
 
   export const ToolPart = PartBase.extend({
     type: z.literal("tool"),
@@ -172,6 +187,21 @@ export namespace MessageV2 {
   })
   export type FilePart = z.infer<typeof FilePart>
 
+  export const AgentPart = PartBase.extend({
+    type: z.literal("agent"),
+    name: z.string(),
+    source: z
+      .object({
+        value: z.string(),
+        start: z.number().int(),
+        end: z.number().int(),
+      })
+      .optional(),
+  }).openapi({
+    ref: "AgentPart",
+  })
+  export type AgentPart = z.infer<typeof AgentPart>
+
   export const StepStartPart = PartBase.extend({
     type: z.literal("step-start"),
   }).openapi({
@@ -212,7 +242,17 @@ export namespace MessageV2 {
   export type User = z.infer<typeof User>
 
   export const Part = z
-    .discriminatedUnion("type", [TextPart, FilePart, ToolPart, StepStartPart, StepFinishPart, SnapshotPart, PatchPart])
+    .discriminatedUnion("type", [
+      TextPart,
+      ReasoningPart,
+      FilePart,
+      ToolPart,
+      StepStartPart,
+      StepFinishPart,
+      SnapshotPart,
+      PatchPart,
+      AgentPart,
+    ])
     .openapi({
       ref: "Part",
     })
@@ -284,11 +324,18 @@ export namespace MessageV2 {
     PartRemoved: Bus.event(
       "message.part.removed",
       z.object({
+        sessionID: z.string(),
         messageID: z.string(),
         partID: z.string(),
       }),
     ),
   }
+
+  export const WithParts = z.object({
+    info: Info,
+    parts: z.array(Part),
+  })
+  export type WithParts = z.infer<typeof WithParts>
 
   export function fromV1(v1: Message.Info) {
     if (v1.role === "assistant") {
@@ -447,8 +494,8 @@ export namespace MessageV2 {
                   text: part.text,
                 },
               ]
-            // text/plain files are converted into text parts, ignore them
-            if (part.type === "file" && part.mime !== "text/plain")
+            // text/plain and directory files are converted into text parts, ignore them
+            if (part.type === "file" && part.mime !== "text/plain" && part.mime !== "application/x-directory")
               return [
                 {
                   type: "file",
@@ -488,7 +535,7 @@ export namespace MessageV2 {
                     state: "output-available",
                     toolCallId: part.callID,
                     input: part.state.input,
-                    output: part.state.output,
+                    output: part.state.time.compacted ? "[Old tool result content cleared]" : part.state.output,
                   },
                 ]
               if (part.state.status === "error")
@@ -510,5 +557,11 @@ export namespace MessageV2 {
     }
 
     return convertToModelMessages(result)
+  }
+
+  export function filterSummarized(msgs: { info: MessageV2.Info; parts: MessageV2.Part[] }[]) {
+    const i = msgs.findLastIndex((m) => m.info.role === "assistant" && !!m.info.summary)
+    if (i === -1) return msgs.slice()
+    return msgs.slice(i)
   }
 }

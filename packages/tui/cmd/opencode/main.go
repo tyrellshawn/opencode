@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
@@ -19,6 +18,7 @@ import (
 	"github.com/sst/opencode/internal/clipboard"
 	"github.com/sst/opencode/internal/tui"
 	"github.com/sst/opencode/internal/util"
+	"golang.org/x/sync/errgroup"
 )
 
 var Version = "dev"
@@ -31,26 +31,11 @@ func main() {
 
 	var model *string = flag.String("model", "", "model to begin with")
 	var prompt *string = flag.String("prompt", "", "prompt to begin with")
-	var mode *string = flag.String("mode", "", "mode to begin with")
+	var agent *string = flag.String("agent", "", "agent to begin with")
+	var sessionID *string = flag.String("session", "", "session ID")
 	flag.Parse()
 
 	url := os.Getenv("OPENCODE_SERVER")
-
-	appInfoStr := os.Getenv("OPENCODE_APP_INFO")
-	var appInfo opencode.App
-	err := json.Unmarshal([]byte(appInfoStr), &appInfo)
-	if err != nil {
-		slog.Error("Failed to unmarshal app info", "error", err)
-		os.Exit(1)
-	}
-
-	modesStr := os.Getenv("OPENCODE_MODES")
-	var modes []opencode.Mode
-	err = json.Unmarshal([]byte(modesStr), &modes)
-	if err != nil {
-		slog.Error("Failed to unmarshal modes", "error", err)
-		os.Exit(1)
-	}
 
 	stat, err := os.Stdin.Stat()
 	if err != nil {
@@ -80,13 +65,51 @@ func main() {
 		option.WithBaseURL(url),
 	)
 
+	var agents []opencode.Agent
+	var path *opencode.Path
+	var project *opencode.Project
+
+	batch := errgroup.Group{}
+
+	batch.Go(func() error {
+		result, err := httpClient.Project.Current(context.Background(), opencode.ProjectCurrentParams{})
+		if err != nil {
+			return err
+		}
+		project = result
+		return nil
+	})
+
+	batch.Go(func() error {
+		result, err := httpClient.Agent.List(context.Background(), opencode.AgentListParams{})
+		if err != nil {
+			return err
+		}
+		agents = *result
+		return nil
+	})
+
+	batch.Go(func() error {
+		result, err := httpClient.Path.Get(context.Background(), opencode.PathGetParams{})
+		if err != nil {
+			return err
+		}
+		path = result
+		return nil
+	})
+
+	err = batch.Wait()
+	if err != nil {
+		panic(err)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	apiHandler := util.NewAPILogHandler(ctx, httpClient, "tui", slog.LevelDebug)
 	logger := slog.New(apiHandler)
 	slog.SetDefault(logger)
 
-	slog.Debug("TUI launched", "app", appInfoStr, "modes", modesStr)
+	slog.Debug("TUI launched")
 
 	go func() {
 		err = clipboard.Init()
@@ -96,13 +119,14 @@ func main() {
 	}()
 
 	// Create main context for the application
-	app_, err := app.New(ctx, version, appInfo, modes, httpClient, model, prompt, mode)
+	app_, err := app.New(ctx, version, project, path, agents, httpClient, model, prompt, agent, sessionID)
 	if err != nil {
 		panic(err)
 	}
 
+	tuiModel := tui.NewModel(app_).(*tui.Model)
 	program := tea.NewProgram(
-		tui.NewModel(app_),
+		tuiModel,
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
 	)
@@ -112,12 +136,9 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
 
 	go func() {
-		stream := httpClient.Event.ListStreaming(ctx)
+		stream := httpClient.Event.ListStreaming(ctx, opencode.EventListParams{})
 		for stream.Next() {
 			evt := stream.Current().AsUnion()
-			if _, ok := evt.(opencode.EventListResponseEventStorageWrite); ok {
-				continue
-			}
 			program.Send(evt)
 		}
 		if err := stream.Err(); err != nil {
@@ -132,6 +153,7 @@ func main() {
 	go func() {
 		sig := <-sigChan
 		slog.Info("Received signal, shutting down gracefully", "signal", sig)
+		tuiModel.Cleanup()
 		program.Quit()
 	}()
 
@@ -141,5 +163,6 @@ func main() {
 		slog.Error("TUI error", "error", err)
 	}
 
+	tuiModel.Cleanup()
 	slog.Info("TUI exited", "result", result)
 }

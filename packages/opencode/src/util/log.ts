@@ -53,12 +53,10 @@ export namespace Log {
 
   export async function init(options: Options) {
     if (options.level) level = options.level
-    const dir = path.join(Global.Path.data, "log")
-    await fs.mkdir(dir, { recursive: true })
-    cleanup(dir)
+    cleanup(Global.Path.log)
     if (options.print) return
     logpath = path.join(
-      dir,
+      Global.Path.log,
       options.dev ? "dev.log" : new Date().toISOString().split(".")[0].replace(/:/g, "") + ".log",
     )
     const logfile = Bun.file(logpath)
@@ -85,6 +83,13 @@ export namespace Log {
     await Promise.all(filesToDelete.map((file) => fs.unlink(file).catch(() => {})))
   }
 
+  function formatError(error: Error, depth = 0): string {
+    const result = error.message
+    return error.cause instanceof Error && depth < 10
+      ? result + " Caused by: " + formatError(error.cause, depth + 1)
+      : result
+  }
+
   let last = Date.now()
   export function create(tags?: Record<string, any>) {
     tags = tags || {}
@@ -103,7 +108,12 @@ export namespace Log {
         ...extra,
       })
         .filter(([_, value]) => value !== undefined && value !== null)
-        .map(([key, value]) => `${key}=${typeof value === "object" ? JSON.stringify(value) : value}`)
+        .map(([key, value]) => {
+          const prefix = `${key}=`
+          if (value instanceof Error) return prefix + formatError(value)
+          if (typeof value === "object") return prefix + JSON.stringify(value)
+          return prefix + value
+        })
         .join(" ")
       const next = new Date()
       const diff = next.getTime() - last

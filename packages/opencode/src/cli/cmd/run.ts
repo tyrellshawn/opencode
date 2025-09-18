@@ -8,8 +8,10 @@ import { Flag } from "../../flag/flag"
 import { Config } from "../../config/config"
 import { bootstrap } from "../bootstrap"
 import { MessageV2 } from "../../session/message-v2"
-import { Mode } from "../../session/mode"
 import { Identifier } from "../../id/id"
+import { Agent } from "../../agent/agent"
+import { Command } from "../../command"
+import { SessionPrompt } from "../../session/prompt"
 
 const TOOL: Record<string, [string, string]> = {
   todowrite: ["Todo", UI.Style.TEXT_WARNING_BOLD],
@@ -35,6 +37,10 @@ export const RunCommand = cmd({
         array: true,
         default: [],
       })
+      .option("command", {
+        describe: "the command to run, use message for args",
+        type: "string",
+      })
       .option("continue", {
         alias: ["c"],
         describe: "continue the last session",
@@ -54,9 +60,9 @@ export const RunCommand = cmd({
         alias: ["m"],
         describe: "model to use in the format of provider/model",
       })
-      .option("mode", {
+      .option("agent", {
         type: "string",
-        describe: "mode to use",
+        describe: "agent to use",
       })
   },
   handler: async (args) => {
@@ -64,14 +70,32 @@ export const RunCommand = cmd({
 
     if (!process.stdin.isTTY) message += "\n" + (await Bun.stdin.text())
 
-    await bootstrap({ cwd: process.cwd() }, async () => {
+    if (message.trim().length === 0 && !args.command) {
+      UI.error("You must provide a message or a command")
+      process.exit(1)
+    }
+
+    await bootstrap(process.cwd(), async () => {
+      if (args.command) {
+        const exists = await Command.get(args.command)
+        if (!exists) {
+          UI.error(`Command "${args.command}" not found`)
+          process.exit(1)
+        }
+      }
       const session = await (async () => {
         if (args.continue) {
-          const list = Session.list()
-          const first = await list.next()
-          await list.return()
-          if (first.done) return
-          return first.value
+          const it = Session.list()
+          try {
+            for await (const s of it) {
+              if (s.parentID === undefined) {
+                return s
+              }
+            }
+            return
+          } finally {
+            await it.return()
+          }
         }
 
         if (args.session) return Session.get(args.session)
@@ -81,12 +105,8 @@ export const RunCommand = cmd({
 
       if (!session) {
         UI.error("Session not found")
-        return
+        process.exit(1)
       }
-
-      UI.empty()
-      UI.println(UI.logo())
-      UI.empty()
 
       const cfg = await Config.get()
       if (cfg.share === "auto" || Flag.OPENCODE_AUTO_SHARE || args.share) {
@@ -101,11 +121,19 @@ export const RunCommand = cmd({
           }
         }
       }
-      UI.empty()
 
-      const { providerID, modelID } = args.model ? Provider.parseModel(args.model) : await Provider.defaultModel()
-      UI.println(UI.Style.TEXT_NORMAL_BOLD + "@ ", UI.Style.TEXT_NORMAL + `${providerID}/${modelID}`)
-      UI.empty()
+      const agent = await (async () => {
+        if (args.agent) return Agent.get(args.agent)
+        const build = Agent.get("build")
+        if (build) return build
+        return Agent.list().then((x) => x[0])
+      })()
+
+      const { providerID, modelID } = await (async () => {
+        if (args.model) return Provider.parseModel(args.model)
+        if (agent.model) return agent.model
+        return await Provider.defaultModel()
+      })()
 
       function printEvent(color: string, type: string, title: string) {
         UI.println(
@@ -125,7 +153,8 @@ export const RunCommand = cmd({
         if (part.type === "tool" && part.state.status === "completed") {
           const [tool, color] = TOOL[part.tool] ?? [part.tool, UI.Style.TEXT_INFO_BOLD]
           const title =
-            part.state.title || Object.keys(part.state.input).length > 0 ? JSON.stringify(part.state.input) : "Unknown"
+            part.state.title ||
+            (Object.keys(part.state.input).length > 0 ? JSON.stringify(part.state.input) : "Unknown")
           printEvent(color, tool, title)
         }
 
@@ -156,19 +185,27 @@ export const RunCommand = cmd({
         UI.error(err)
       })
 
-      const mode = args.mode ? await Mode.get(args.mode) : await Mode.list().then((x) => x[0])
+      if (args.command) {
+        await SessionPrompt.command({
+          messageID: Identifier.ascending("message"),
+          sessionID: session.id,
+          agent: agent.name,
+          model: providerID + "/" + modelID,
+          command: args.command,
+          arguments: message,
+        })
+        return
+      }
 
       const messageID = Identifier.ascending("message")
-      const result = await Session.chat({
+      const result = await SessionPrompt.prompt({
         sessionID: session.id,
         messageID,
-        ...(mode.model
-          ? mode.model
-          : {
-              providerID,
-              modelID,
-            }),
-        mode: mode.name,
+        model: {
+          providerID,
+          modelID,
+        },
+        agent: agent.name,
         parts: [
           {
             id: Identifier.ascending("part"),
@@ -180,11 +217,12 @@ export const RunCommand = cmd({
 
       const isPiped = !process.stdout.isTTY
       if (isPiped) {
-        const match = result.parts.findLast((x) => x.type === "text")
+        const match = result.parts.findLast((x: any) => x.type === "text") as any
         if (match) process.stdout.write(UI.markdown(match.text))
         if (errorMsg) process.stdout.write(errorMsg)
       }
       UI.empty()
+      if (errorMsg) process.exit(1)
     })
   },
 })

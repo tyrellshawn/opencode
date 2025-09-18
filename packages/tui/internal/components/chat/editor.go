@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/v2/spinner"
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -30,6 +31,7 @@ type EditorComponent interface {
 	tea.Model
 	tea.ViewModel
 	Content() string
+	Cursor() *tea.Cursor
 	Lines() int
 	Value() string
 	Length() int
@@ -37,6 +39,7 @@ type EditorComponent interface {
 	Focus() (tea.Model, tea.Cmd)
 	Blur()
 	Submit() (tea.Model, tea.Cmd)
+	SubmitBash() (tea.Model, tea.Cmd)
 	Clear() (tea.Model, tea.Cmd)
 	Paste() (tea.Model, tea.Cmd)
 	Newline() (tea.Model, tea.Cmd)
@@ -157,7 +160,7 @@ func (m *editorComponent) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if filePath := strings.TrimSpace(strings.TrimPrefix(text, "@")); strings.HasPrefix(text, "@") && filePath != "" {
 			statPath := filePath
 			if !filepath.IsAbs(filePath) {
-				statPath = filepath.Join(m.app.Info.Path.Cwd, filePath)
+				statPath = filepath.Join(util.CwdPath, filePath)
 			}
 			if _, err := os.Stat(statPath); err == nil {
 				attachment := m.createAttachmentFromPath(filePath)
@@ -221,10 +224,17 @@ func (m *editorComponent) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dialog.CompletionSelectedMsg:
 		switch msg.Item.ProviderID {
 		case "commands":
-			commandName := strings.TrimPrefix(msg.Item.Value, "/")
+			command := msg.Item.RawData.(commands.Command)
+			if command.Custom {
+				m.SetValue("/" + command.PrimaryTrigger() + " ")
+				return m, nil
+			}
+
 			updated, cmd := m.Clear()
 			m = updated.(*editorComponent)
 			cmds = append(cmds, cmd)
+
+			commandName := strings.TrimPrefix(msg.Item.Value, "/")
 			cmds = append(cmds, util.CmdHandler(commands.ExecuteCommandMsg(m.app.Commands[commands.CommandName(commandName)])))
 			return m, tea.Batch(cmds...)
 		case "files":
@@ -287,6 +297,31 @@ func (m *editorComponent) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.textarea.InsertAttachment(attachment)
 			m.textarea.InsertString(" ")
 			return m, nil
+		case "agents":
+			atIndex := m.textarea.LastRuneIndex('@')
+			if atIndex == -1 {
+				// Should not happen, but as a fallback, just insert.
+				m.textarea.InsertString(msg.Item.Value + " ")
+				return m, nil
+			}
+
+			cursorCol := m.textarea.CursorColumn()
+			m.textarea.ReplaceRange(atIndex, cursorCol, "")
+
+			name := msg.Item.Value
+			attachment := &attachment.Attachment{
+				ID:      uuid.NewString(),
+				Type:    "agent",
+				Display: "@" + name,
+				Source: &attachment.AgentSource{
+					Name: name,
+				},
+			}
+
+			m.textarea.InsertAttachment(attachment)
+			m.textarea.InsertString(" ")
+			return m, nil
+
 		default:
 			slog.Debug("Unknown provider", "provider", msg.Item.ProviderID)
 			return m, nil
@@ -311,10 +346,19 @@ func (m *editorComponent) Content() string {
 	t := theme.CurrentTheme()
 	base := styles.NewStyle().Foreground(t.Text()).Background(t.Background()).Render
 	muted := styles.NewStyle().Foreground(t.TextMuted()).Background(t.Background()).Render
+
 	promptStyle := styles.NewStyle().Foreground(t.Primary()).
 		Padding(0, 0, 0, 1).
 		Bold(true)
 	prompt := promptStyle.Render(">")
+	borderForeground := t.Border()
+	if m.app.IsLeaderSequence {
+		borderForeground = t.Accent()
+	}
+	if m.app.IsBashMode {
+		borderForeground = t.Secondary()
+		prompt = promptStyle.Render("!")
+	}
 
 	m.textarea.SetWidth(width - 6)
 	textarea := lipgloss.JoinHorizontal(
@@ -322,10 +366,6 @@ func (m *editorComponent) Content() string {
 		prompt,
 		m.textarea.View(),
 	)
-	borderForeground := t.Border()
-	if m.app.IsLeaderSequence {
-		borderForeground = t.Accent()
-	}
 	textarea = styles.NewStyle().
 		Background(t.BackgroundElement()).
 		Width(width).
@@ -344,9 +384,16 @@ func (m *editorComponent) Content() string {
 		hint = base(keyText+" again") + muted(" to exit")
 	} else if m.app.IsBusy() {
 		keyText := m.getInterruptKeyText()
-		if m.interruptKeyInDebounce {
+		status := "working"
+		if m.app.IsCompacting() {
+			status = "compacting"
+		}
+		if m.app.CurrentPermission.ID != "" {
+			status = "waiting for permission"
+		}
+		if m.interruptKeyInDebounce && m.app.CurrentPermission.ID == "" {
 			hint = muted(
-				"working",
+				status,
 			) + m.spinner.View() + muted(
 				"  ",
 			) + base(
@@ -355,7 +402,10 @@ func (m *editorComponent) Content() string {
 				" interrupt",
 			)
 		} else {
-			hint = muted("working") + m.spinner.View() + muted("  ") + base(keyText) + muted(" interrupt")
+			hint = muted(status) + m.spinner.View()
+			if m.app.CurrentPermission.ID == "" {
+				hint += muted("  ") + base(keyText) + muted(" interrupt")
+			}
 		}
 	}
 
@@ -372,6 +422,10 @@ func (m *editorComponent) Content() string {
 
 	content := strings.Join([]string{"", textarea, info}, "\n")
 	return content
+}
+
+func (m *editorComponent) Cursor() *tea.Cursor {
+	return m.textarea.Cursor()
 }
 
 func (m *editorComponent) View() string {
@@ -437,6 +491,39 @@ func (m *editorComponent) Submit() (tea.Model, tea.Cmd) {
 	}
 
 	var cmds []tea.Cmd
+	if strings.HasPrefix(value, "/") {
+		// Expand attachments in the value to get actual content
+		expandedValue := value
+		attachments := m.textarea.GetAttachments()
+		for _, att := range attachments {
+			if att.Type == "text" && att.Source != nil {
+				if textSource, ok := att.Source.(*attachment.TextSource); ok {
+					expandedValue = strings.Replace(expandedValue, att.Display, textSource.Value, 1)
+				}
+			}
+		}
+
+		expandedValue = expandedValue[1:] // Remove the "/"
+		commandName := strings.Split(expandedValue, " ")[0]
+		command := m.app.Commands[commands.CommandName(commandName)]
+		if command.Custom {
+			args := ""
+			if strings.HasPrefix(expandedValue, command.PrimaryTrigger()+" ") {
+				args = strings.TrimPrefix(expandedValue, command.PrimaryTrigger()+" ")
+			}
+			cmds = append(
+				cmds,
+				util.CmdHandler(app.SendCommand{Command: string(command.Name), Args: args}),
+			)
+
+			updated, cmd := m.Clear()
+			m = updated.(*editorComponent)
+			cmds = append(cmds, cmd)
+
+			return m, tea.Batch(cmds...)
+		}
+	}
+
 	attachments := m.textarea.GetAttachments()
 
 	prompt := app.Prompt{Text: value, Attachments: attachments}
@@ -448,6 +535,16 @@ func (m *editorComponent) Submit() (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 
 	cmds = append(cmds, util.CmdHandler(app.SendPrompt(prompt)))
+	return m, tea.Batch(cmds...)
+}
+
+func (m *editorComponent) SubmitBash() (tea.Model, tea.Cmd) {
+	command := m.textarea.Value()
+	var cmds []tea.Cmd
+	updated, cmd := m.Clear()
+	m = updated.(*editorComponent)
+	cmds = append(cmds, cmd)
+	cmds = append(cmds, util.CmdHandler(app.SendShell{Command: command}))
 	return m, tea.Batch(cmds...)
 }
 
@@ -517,18 +614,22 @@ func (m *editorComponent) SetValueWithAttachments(value string) {
 
 	i := 0
 	for i < len(value) {
+		r, size := utf8.DecodeRuneInString(value[i:])
 		// Check if filepath and add attachment
-		if value[i] == '@' {
-			start := i + 1
+		if r == '@' {
+			start := i + size
 			end := start
-			for end < len(value) && value[end] != ' ' && value[end] != '\t' && value[end] != '\n' && value[end] != '\r' {
-				end++
+			for end < len(value) {
+				nextR, nextSize := utf8.DecodeRuneInString(value[end:])
+				if nextR == ' ' || nextR == '\t' || nextR == '\n' || nextR == '\r' {
+					break
+				}
+				end += nextSize
 			}
-
 			if end > start {
 				filePath := value[start:end]
 				slog.Debug("test", "filePath", filePath)
-				if _, err := os.Stat(filepath.Join(m.app.Info.Path.Cwd, filePath)); err == nil {
+				if _, err := os.Stat(filepath.Join(util.CwdPath, filePath)); err == nil {
 					slog.Debug("test", "found", true)
 					attachment := m.createAttachmentFromFile(filePath)
 					if attachment != nil {
@@ -541,8 +642,8 @@ func (m *editorComponent) SetValueWithAttachments(value string) {
 		}
 
 		// Not a valid file path, insert the character normally
-		m.textarea.InsertRune(rune(value[i]))
-		i++
+		m.textarea.InsertRune(r)
+		i += size
 	}
 }
 
@@ -564,6 +665,14 @@ func (m *editorComponent) getExitKeyText() string {
 
 // shouldSummarizePastedText determines if pasted text should be summarized
 func (m *editorComponent) shouldSummarizePastedText(text string) bool {
+	if m.app.IsBashMode {
+		return false
+	}
+
+	if m.app.Config != nil && m.app.Config.Experimental.DisablePasteSummary {
+		return false
+	}
+
 	lines := strings.Split(text, "\n")
 	lineCount := len(lines)
 	charCount := len(text)
@@ -657,6 +766,7 @@ func NewEditorComponent(app *app.App) EditorComponent {
 	ta.Prompt = " "
 	ta.ShowLineNumbers = false
 	ta.CharLimit = -1
+	ta.VirtualCursor = false
 	ta = updateTextareaStyles(ta)
 
 	m := &editorComponent{
@@ -722,7 +832,7 @@ func (m *editorComponent) createAttachmentFromFile(filePath string) *attachment.
 	mediaType := getMediaTypeFromExtension(ext)
 	absolutePath := filePath
 	if !filepath.IsAbs(filePath) {
-		absolutePath = filepath.Join(m.app.Info.Path.Cwd, filePath)
+		absolutePath = filepath.Join(util.CwdPath, filePath)
 	}
 
 	// For text files, create a simple file reference
@@ -776,7 +886,7 @@ func (m *editorComponent) createAttachmentFromPath(filePath string) *attachment.
 	mediaType := getMediaTypeFromExtension(extension)
 	absolutePath := filePath
 	if !filepath.IsAbs(filePath) {
-		absolutePath = filepath.Join(m.app.Info.Path.Cwd, filePath)
+		absolutePath = filepath.Join(util.CwdPath, filePath)
 	}
 	return &attachment.Attachment{
 		ID:        uuid.NewString(),

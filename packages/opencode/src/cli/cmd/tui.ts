@@ -11,8 +11,22 @@ import { Config } from "../../config/config"
 import { Bus } from "../../bus"
 import { Log } from "../../util/log"
 import { FileWatcher } from "../../file/watch"
-import { Mode } from "../../session/mode"
 import { Ide } from "../../ide"
+
+import { Flag } from "../../flag/flag"
+import { Session } from "../../session"
+import { Instance } from "../../project/instance"
+import { $ } from "bun"
+
+declare global {
+  const OPENCODE_TUI_PATH: string
+}
+
+if (typeof OPENCODE_TUI_PATH !== "undefined") {
+  await import(OPENCODE_TUI_PATH as string, {
+    with: { type: "file" },
+  })
+}
 
 export const TuiCommand = cmd({
   command: "$0 [project]",
@@ -28,14 +42,24 @@ export const TuiCommand = cmd({
         alias: ["m"],
         describe: "model to use in the format of provider/model",
       })
+      .option("continue", {
+        alias: ["c"],
+        describe: "continue the last session",
+        type: "boolean",
+      })
+      .option("session", {
+        alias: ["s"],
+        describe: "session id to continue",
+        type: "string",
+      })
       .option("prompt", {
         alias: ["p"],
         type: "string",
         describe: "prompt to use",
       })
-      .option("mode", {
+      .option("agent", {
         type: "string",
-        describe: "mode to use",
+        describe: "agent to use",
       })
       .option("port", {
         type: "number",
@@ -57,7 +81,26 @@ export const TuiCommand = cmd({
         UI.error("Failed to change directory to " + cwd)
         return
       }
-      const result = await bootstrap({ cwd }, async (app) => {
+      const result = await bootstrap(cwd, async () => {
+        const sessionID = await (async () => {
+          if (args.continue) {
+            const it = Session.list()
+            try {
+              for await (const s of it) {
+                if (s.parentID === undefined) {
+                  return s.id
+                }
+              }
+              return
+            } finally {
+              await it.return()
+            }
+          }
+          if (args.session) {
+            return args.session
+          }
+          return undefined
+        })()
         FileWatcher.init()
         const providers = await Provider.list()
         if (Object.keys(providers).length === 0) {
@@ -69,22 +112,25 @@ export const TuiCommand = cmd({
           hostname: args.hostname,
         })
 
-        let cmd = ["go", "run", "./main.go"]
-        let cwd = Bun.fileURLToPath(new URL("../../../../tui/cmd/opencode", import.meta.url))
-        if (Bun.embeddedFiles.length > 0) {
-          const blob = Bun.embeddedFiles[0] as File
-          let binaryName = blob.name
+        let cmd = [] as string[]
+        const tui = Bun.embeddedFiles.find((item) => (item as File).name.includes("tui")) as File
+        if (tui) {
+          let binaryName = tui.name
           if (process.platform === "win32" && !binaryName.endsWith(".exe")) {
             binaryName += ".exe"
           }
           const binary = path.join(Global.Path.cache, "tui", binaryName)
           const file = Bun.file(binary)
           if (!(await file.exists())) {
-            await Bun.write(file, blob, { mode: 0o755 })
+            await Bun.write(file, tui, { mode: 0o755 })
             await fs.chmod(binary, 0o755)
           }
-          cwd = process.cwd()
           cmd = [binary]
+        }
+        if (!tui) {
+          const dir = Bun.fileURLToPath(new URL("../../../../tui/cmd/opencode", import.meta.url))
+          await $`go build -o ./dist/tui ./main.go`.cwd(dir)
+          cmd = [path.join(dir, "dist/tui")]
         }
         Log.Default.info("tui", {
           cmd,
@@ -94,7 +140,8 @@ export const TuiCommand = cmd({
             ...cmd,
             ...(args.model ? ["--model", args.model] : []),
             ...(args.prompt ? ["--prompt", args.prompt] : []),
-            ...(args.mode ? ["--mode", args.mode] : []),
+            ...(args.agent ? ["--agent", args.agent] : []),
+            ...(sessionID ? ["--session", sessionID] : []),
           ],
           cwd,
           stdout: "inherit",
@@ -104,8 +151,7 @@ export const TuiCommand = cmd({
             ...process.env,
             CGO_ENABLED: "0",
             OPENCODE_SERVER: server.url.toString(),
-            OPENCODE_APP_INFO: JSON.stringify(app),
-            OPENCODE_MODES: JSON.stringify(await Mode.list()),
+            OPENCODE_PROJECT: JSON.stringify(Instance.project),
           },
           onExit: () => {
             server.stop()
@@ -113,10 +159,10 @@ export const TuiCommand = cmd({
         })
 
         ;(async () => {
-          if (Installation.VERSION === "dev") return
+          if (Installation.isDev()) return
           if (Installation.isSnapshot()) return
           const config = await Config.global()
-          if (config.autoupdate === false) return
+          if (config.autoupdate === false || Flag.OPENCODE_DISABLE_AUTOUPDATE) return
           const latest = await Installation.latest().catch(() => {})
           if (!latest) return
           if (Installation.VERSION === latest) return

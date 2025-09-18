@@ -6,10 +6,16 @@ import { Bus } from "../bus"
 import { MessageV2 } from "../session/message-v2"
 import { Identifier } from "../id/id"
 import { Agent } from "../agent/agent"
+import { SessionPrompt } from "../session/prompt"
 
 export const TaskTool = Tool.define("task", async () => {
-  const agents = await Agent.list()
-  const description = DESCRIPTION.replace("{agents}", agents.map((a) => `- ${a.name}: ${a.description}`).join("\n"))
+  const agents = await Agent.list().then((x) => x.filter((a) => a.mode !== "primary"))
+  const description = DESCRIPTION.replace(
+    "{agents}",
+    agents
+      .map((a) => `- ${a.name}: ${a.description ?? "This subagent should only be called manually by the user."}`)
+      .join("\n"),
+  )
   return {
     description,
     parameters: z.object({
@@ -18,10 +24,11 @@ export const TaskTool = Tool.define("task", async () => {
       subagent_type: z.string().describe("The type of specialized agent to use for this task"),
     }),
     async execute(params, ctx) {
-      const session = await Session.create(ctx.sessionID)
-      const msg = await Session.getMessage(ctx.sessionID, ctx.messageID)
-      if (msg.role !== "assistant") throw new Error("Not an assistant message")
       const agent = await Agent.get(params.subagent_type)
+      if (!agent) throw new Error(`Unknown agent type: ${params.subagent_type} is not a valid agent type`)
+      const session = await Session.create(ctx.sessionID, params.description + ` (@${agent.name} subagent)`)
+      const msg = await Session.getMessage(ctx.sessionID, ctx.messageID)
+      if (msg.info.role !== "assistant") throw new Error("Not an assistant message")
       const messageID = Identifier.ascending("message")
       const parts: Record<string, MessageV2.ToolPart> = {}
       const unsub = Bus.subscribe(MessageV2.Event.PartUpdated, async (evt) => {
@@ -38,23 +45,26 @@ export const TaskTool = Tool.define("task", async () => {
       })
 
       const model = agent.model ?? {
-        modelID: msg.modelID,
-        providerID: msg.providerID,
+        modelID: msg.info.modelID,
+        providerID: msg.info.providerID,
       }
 
       ctx.abort.addEventListener("abort", () => {
-        Session.abort(session.id)
+        SessionPrompt.abort(session.id)
       })
-      const result = await Session.chat({
+      const result = await SessionPrompt.prompt({
         messageID,
         sessionID: session.id,
-        modelID: model.modelID,
-        providerID: model.providerID,
-        mode: msg.mode,
-        system: agent.prompt,
+        model: {
+          modelID: model.modelID,
+          providerID: model.providerID,
+        },
+        agent: agent.name,
         tools: {
-          ...agent.tools,
+          todowrite: false,
+          todoread: false,
           task: false,
+          ...agent.tools,
         },
         parts: [
           {
@@ -68,9 +78,9 @@ export const TaskTool = Tool.define("task", async () => {
       return {
         title: params.description,
         metadata: {
-          summary: result.parts.filter((x) => x.type === "tool"),
+          summary: result.parts.filter((x: any) => x.type === "tool"),
         },
-        output: result.parts.findLast((x) => x.type === "text")!.text,
+        output: (result.parts.findLast((x: any) => x.type === "text") as any)?.text ?? "",
       }
     },
   }

@@ -1,21 +1,13 @@
 #!/usr/bin/env bun
-
+const dir = new URL("..", import.meta.url).pathname
+process.chdir(dir)
 import { $ } from "bun"
 
 import pkg from "../package.json"
 
-const dry = process.argv.includes("--dry")
-const snapshot = process.argv.includes("--snapshot")
-
-const version = snapshot
-  ? `0.0.0-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "")}`
-  : await $`git describe --tags --abbrev=0`
-      .text()
-      .then((x) => x.substring(1).trim())
-      .catch(() => {
-        console.error("tag not found")
-        process.exit(1)
-      })
+const dry = process.env["OPENCODE_DRY"] === "true"
+const version = process.env["OPENCODE_VERSION"]!
+const snapshot = process.env["OPENCODE_SNAPSHOT"] === "true"
 
 console.log(`publishing ${version}`)
 
@@ -26,12 +18,13 @@ const GOARCH: Record<string, string> = {
 }
 
 const targets = [
+  ["windows", "x64"],
   ["linux", "arm64"],
   ["linux", "x64"],
   ["linux", "x64-baseline"],
   ["darwin", "x64"],
+  ["darwin", "x64-baseline"],
   ["darwin", "arm64"],
-  ["windows", "x64"],
 ]
 
 await $`rm -rf dist`
@@ -45,7 +38,28 @@ for (const [os, arch] of targets) {
   await $`CGO_ENABLED=0 GOOS=${os} GOARCH=${GOARCH[arch]} go build -ldflags="-s -w -X main.Version=${version}" -o ../opencode/dist/${name}/bin/tui ../tui/cmd/opencode/main.go`.cwd(
     "../tui",
   )
-  await $`bun build --define OPENCODE_VERSION="'${version}'" --compile --minify --target=bun-${os}-${arch} --outfile=dist/${name}/bin/opencode ./src/index.ts ./dist/${name}/bin/tui`
+  await Bun.build({
+    compile: {
+      target: `bun-${os}-${arch}` as any,
+      outfile: `dist/${name}/bin/opencode`,
+      execArgv: [`--user-agent=opencode/${version}`, `--`],
+      windows: {},
+    },
+    entrypoints: ["./src/index.ts"],
+    define: {
+      OPENCODE_VERSION: `'${version}'`,
+      OPENCODE_TUI_PATH: `'../../../dist/${name}/bin/tui'`,
+    },
+  })
+  // await $`bun build --define OPENCODE_TUI_PATH="'../../../dist/${name}/bin/tui'" --define OPENCODE_VERSION="'${version}'" --compile --target=bun-${os}-${arch} --outfile=dist/${name}/bin/opencode ./src/index.ts`
+  // Run the binary only if it matches current OS/arch
+  if (
+    process.platform === (os === "windows" ? "win32" : os) &&
+    (process.arch === arch || (process.arch === "x64" && arch === "x64-baseline"))
+  ) {
+    console.log(`smoke test: running dist/${name}/bin/opencode --version`)
+    await $`./dist/${name}/bin/opencode --version`
+  }
   await $`rm -rf ./dist/${name}/bin/tui`
   await Bun.file(`dist/${name}/package.json`).write(
     JSON.stringify(
@@ -59,12 +73,13 @@ for (const [os, arch] of targets) {
       2,
     ),
   )
-  if (!dry) await $`cd dist/${name} && bun publish --access public --tag ${npmTag}`
+  if (!dry) await $`cd dist/${name} && chmod 777 -R . && bun publish --access public --tag ${npmTag}`
   optionalDependencies[name] = version
 }
 
 await $`mkdir -p ./dist/${pkg.name}`
 await $`cp -r ./bin ./dist/${pkg.name}/bin`
+await $`cp ./script/preinstall.mjs ./dist/${pkg.name}/preinstall.mjs`
 await $`cp ./script/postinstall.mjs ./dist/${pkg.name}/postinstall.mjs`
 await Bun.file(`./dist/${pkg.name}/package.json`).write(
   JSON.stringify(
@@ -74,6 +89,7 @@ await Bun.file(`./dist/${pkg.name}/package.json`).write(
         [pkg.name]: `./bin/${pkg.name}`,
       },
       scripts: {
+        preinstall: "node ./preinstall.mjs",
         postinstall: "node ./postinstall.mjs",
       },
       version,
@@ -86,42 +102,9 @@ await Bun.file(`./dist/${pkg.name}/package.json`).write(
 if (!dry) await $`cd ./dist/${pkg.name} && bun publish --access public --tag ${npmTag}`
 
 if (!snapshot) {
-  // Github Release
   for (const key of Object.keys(optionalDependencies)) {
     await $`cd dist/${key}/bin && zip -r ../../${key}.zip *`
   }
-
-  const previous = await fetch("https://api.github.com/repos/sst/opencode/releases/latest")
-    .then((res) => {
-      if (!res.ok) throw new Error(res.statusText)
-      return res.json()
-    })
-    .then((data) => data.tag_name)
-
-  console.log("finding commits between", previous, "and", "HEAD")
-  const commits = await fetch(`https://api.github.com/repos/sst/opencode/compare/${previous}...HEAD`)
-    .then((res) => res.json())
-    .then((data) => data.commits || [])
-
-  const raw = commits.map((commit: any) => `- ${commit.commit.message.split("\n").join(" ")}`)
-  console.log(raw)
-
-  const notes =
-    raw
-      .filter((x: string) => {
-        const lower = x.toLowerCase()
-        return (
-          !lower.includes("ignore:") &&
-          !lower.includes("chore:") &&
-          !lower.includes("ci:") &&
-          !lower.includes("wip:") &&
-          !lower.includes("docs:") &&
-          !lower.includes("doc:")
-        )
-      })
-      .join("\n") || "No notable changes"
-
-  if (!dry) await $`gh release create v${version} --title "v${version}" --notes ${notes} ./dist/*.zip`
 
   // Calculate SHA values
   const arm64Sha = await $`sha256sum ./dist/opencode-linux-arm64.zip | cut -d' ' -f1`.text().then((x) => x.trim())
@@ -129,12 +112,11 @@ if (!snapshot) {
   const macX64Sha = await $`sha256sum ./dist/opencode-darwin-x64.zip | cut -d' ' -f1`.text().then((x) => x.trim())
   const macArm64Sha = await $`sha256sum ./dist/opencode-darwin-arm64.zip | cut -d' ' -f1`.text().then((x) => x.trim())
 
-  // AUR package
-  const pkgbuild = [
+  const binaryPkgbuild = [
     "# Maintainer: dax",
     "# Maintainer: adam",
     "",
-    "pkgname='${pkg}'",
+    "pkgname='opencode-bin'",
     `pkgver=${version.split("-")[0]}`,
     "options=('!debug' '!strip')",
     "pkgrel=1",
@@ -158,11 +140,58 @@ if (!snapshot) {
     "",
   ].join("\n")
 
-  for (const pkg of ["opencode", "opencode-bin"]) {
+  // Source-based PKGBUILD for opencode
+  const sourcePkgbuild = [
+    "# Maintainer: dax",
+    "# Maintainer: adam",
+    "",
+    "pkgname='opencode'",
+    `pkgver=${version.split("-")[0]}`,
+    "options=('!debug' '!strip')",
+    "pkgrel=1",
+    "pkgdesc='The AI coding agent built for the terminal.'",
+    "url='https://github.com/sst/opencode'",
+    "arch=('aarch64' 'x86_64')",
+    "license=('MIT')",
+    "provides=('opencode')",
+    "conflicts=('opencode-bin')",
+    "depends=('fzf' 'ripgrep')",
+    "makedepends=('git' 'bun-bin' 'go')",
+    "",
+    `source=("opencode-\${pkgver}.tar.gz::https://github.com/sst/opencode/archive/v${version}.tar.gz")`,
+    `sha256sums=('SKIP')`,
+    "",
+    "build() {",
+    `  cd "opencode-\${pkgver}"`,
+    `  bun install`,
+    "  cd packages/tui",
+    `  CGO_ENABLED=0 go build -ldflags="-s -w -X main.Version=\${pkgver}" -o tui cmd/opencode/main.go`,
+    "  cd ../opencode",
+    `  bun build --define OPENCODE_TUI_PATH="'$(realpath ../tui/tui)'" --define OPENCODE_VERSION="'\${pkgver}'" --compile --target=bun-linux-x64 --outfile=opencode ./src/index.ts`,
+    "}",
+    "",
+    "package() {",
+    `  cd "opencode-\${pkgver}/packages/opencode"`,
+    '  install -Dm755 ./opencode "${pkgdir}/usr/bin/opencode"',
+    "}",
+    "",
+  ].join("\n")
+
+  for (const [pkg, pkgbuild] of [
+    ["opencode-bin", binaryPkgbuild],
+    ["opencode", sourcePkgbuild],
+  ]) {
     await $`rm -rf ./dist/aur-${pkg}`
-    await $`git clone ssh://aur@aur.archlinux.org/${pkg}.git ./dist/aur-${pkg}`
+    while (true) {
+      try {
+        await $`git clone ssh://aur@aur.archlinux.org/${pkg}.git ./dist/aur-${pkg}`
+        break
+      } catch (e) {
+        continue
+      }
+    }
     await $`cd ./dist/aur-${pkg} && git checkout master`
-    await Bun.file(`./dist/aur-${pkg}/PKGBUILD`).write(pkgbuild.replace("${pkg}", pkg))
+    await Bun.file(`./dist/aur-${pkg}/PKGBUILD`).write(pkgbuild)
     await $`cd ./dist/aur-${pkg} && makepkg --printsrcinfo > .SRCINFO`
     await $`cd ./dist/aur-${pkg} && git add PKGBUILD .SRCINFO`
     await $`cd ./dist/aur-${pkg} && git commit -m "Update to v${version}"`
