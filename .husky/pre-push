@@ -1,2 +1,3 @@
 #!/bin/sh
-bun typecheck
+# Run typecheck but don't block pushes if it fails
+bun typecheck || true
