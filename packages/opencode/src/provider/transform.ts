@@ -3,21 +3,67 @@ import { unique } from "remeda"
 import type { JSONSchema } from "zod/v4/core"
 
 export namespace ProviderTransform {
-  function normalizeToolCallIds(msgs: ModelMessage[]): ModelMessage[] {
-    return msgs.map((msg) => {
-      if ((msg.role === "assistant" || msg.role === "tool") && Array.isArray(msg.content)) {
-        msg.content = msg.content.map((part) => {
-          if ((part.type === "tool-call" || part.type === "tool-result") && "toolCallId" in part) {
-            return {
-              ...part,
-              toolCallId: part.toolCallId.replace(/[^a-zA-Z0-9_-]/g, "_"),
+  function normalizeMessages(msgs: ModelMessage[], providerID: string, modelID: string): ModelMessage[] {
+    if (modelID.includes("claude")) {
+      return msgs.map((msg) => {
+        if ((msg.role === "assistant" || msg.role === "tool") && Array.isArray(msg.content)) {
+          msg.content = msg.content.map((part) => {
+            if ((part.type === "tool-call" || part.type === "tool-result") && "toolCallId" in part) {
+              return {
+                ...part,
+                toolCallId: part.toolCallId.replace(/[^a-zA-Z0-9_-]/g, "_"),
+              }
             }
-          }
-          return part
-        })
+            return part
+          })
+        }
+        return msg
+      })
+    }
+    if (providerID === "mistral" || modelID.toLowerCase().includes("mistral")) {
+      const result: ModelMessage[] = []
+      for (let i = 0; i < msgs.length; i++) {
+        const msg = msgs[i]
+        const prevMsg = msgs[i - 1]
+        const nextMsg = msgs[i + 1]
+
+        if ((msg.role === "assistant" || msg.role === "tool") && Array.isArray(msg.content)) {
+          msg.content = msg.content.map((part) => {
+            if ((part.type === "tool-call" || part.type === "tool-result") && "toolCallId" in part) {
+              // Mistral requires alphanumeric tool call IDs with exactly 9 characters
+              const normalizedId = part.toolCallId
+                .replace(/[^a-zA-Z0-9]/g, "") // Remove non-alphanumeric characters
+                .substring(0, 9) // Take first 9 characters
+                .padEnd(9, "0") // Pad with zeros if less than 9 characters
+
+              return {
+                ...part,
+                toolCallId: normalizedId,
+              }
+            }
+            return part
+          })
+        }
+
+        result.push(msg)
+
+        // Fix message sequence: tool messages cannot be followed by user messages
+        if (msg.role === "tool" && nextMsg?.role === "user") {
+          result.push({
+            role: "assistant",
+            content: [
+              {
+                type: "text",
+                text: "Done.",
+              },
+            ],
+          })
+        }
       }
-      return msg
-    })
+      return result
+    }
+
+    return msgs
   }
 
   function applyCaching(msgs: ModelMessage[], providerID: string): ModelMessage[] {
@@ -63,9 +109,7 @@ export namespace ProviderTransform {
   }
 
   export function message(msgs: ModelMessage[], providerID: string, modelID: string) {
-    if (modelID.includes("claude")) {
-      msgs = normalizeToolCallIds(msgs)
-    }
+    msgs = normalizeMessages(msgs, providerID, modelID)
     if (providerID === "anthropic" || modelID.includes("anthropic") || modelID.includes("claude")) {
       msgs = applyCaching(msgs, providerID)
     }
@@ -75,7 +119,8 @@ export namespace ProviderTransform {
 
   export function temperature(_providerID: string, modelID: string) {
     if (modelID.toLowerCase().includes("qwen")) return 0.55
-    if (modelID.toLowerCase().includes("claude")) return 1
+    if (modelID.toLowerCase().includes("claude")) return undefined
+    if (modelID.toLowerCase().includes("gemini-3-pro")) return 1.0
     return 0
   }
 
@@ -84,39 +129,110 @@ export namespace ProviderTransform {
     return undefined
   }
 
-  export function options(providerID: string, modelID: string, sessionID: string): Record<string, any> | undefined {
+  export function options(
+    providerID: string,
+    modelID: string,
+    npm: string,
+    sessionID: string,
+  ): Record<string, any> | undefined {
     const result: Record<string, any> = {}
+
+    // switch to providerID later, for now use this
+    if (npm === "@openrouter/ai-sdk-provider") {
+      result["usage"] = {
+        include: true,
+      }
+    }
 
     if (providerID === "openai") {
       result["promptCacheKey"] = sessionID
     }
 
+    if (providerID === "google") {
+      result["thinkingConfig"] = {
+        includeThoughts: true,
+      }
+    }
+
     if (modelID.includes("gpt-5") && !modelID.includes("gpt-5-chat")) {
-      result["reasoningEffort"] = "high"
-      if (providerID !== "azure") {
+      if (modelID.includes("codex")) {
+        result["store"] = false
+      }
+
+      if (!modelID.includes("codex") && !modelID.includes("gpt-5-pro")) {
+        result["reasoningEffort"] = "medium"
+      }
+
+      if (modelID.endsWith("gpt-5.1") && providerID !== "azure") {
         result["textVerbosity"] = "low"
       }
+
       if (providerID === "opencode") {
         result["promptCacheKey"] = sessionID
-        // result["include"] = ["reasoning.encrypted_content"]
-        // result["reasoningSummary"] = "detailed"
+        result["include"] = ["reasoning.encrypted_content"]
+        result["reasoningSummary"] = "auto"
       }
     }
     return result
   }
 
-  export function maxOutputTokens(providerID: string, outputLimit: number, options: Record<string, any>): number {
-    if (providerID === "anthropic") {
-      const thinking = options["thinking"]
-      if (typeof thinking === "object" && thinking !== null) {
-        const type = thinking["type"]
-        const budgetTokens = thinking["budgetTokens"]
-        if (type === "enabled" && typeof budgetTokens === "number" && budgetTokens > 0) {
-          return outputLimit - budgetTokens
+  export function providerOptions(npm: string | undefined, providerID: string, options: { [x: string]: any }) {
+    switch (npm) {
+      case "@ai-sdk/openai":
+      case "@ai-sdk/azure":
+        return {
+          ["openai" as string]: options,
         }
+      case "@ai-sdk/amazon-bedrock":
+        return {
+          ["bedrock" as string]: options,
+        }
+      case "@ai-sdk/anthropic":
+        return {
+          ["anthropic" as string]: options,
+        }
+      case "@ai-sdk/google":
+        return {
+          ["google" as string]: options,
+        }
+      case "@ai-sdk/gateway":
+        return {
+          ["gateway" as string]: options,
+        }
+      case "@openrouter/ai-sdk-provider":
+        return {
+          ["openrouter" as string]: options,
+        }
+      default:
+        return {
+          [providerID]: options,
+        }
+    }
+  }
+
+  export function maxOutputTokens(
+    npm: string,
+    options: Record<string, any>,
+    modelLimit: number,
+    globalLimit: number,
+  ): number {
+    const modelCap = modelLimit || globalLimit
+    const standardLimit = Math.min(modelCap, globalLimit)
+
+    if (npm === "@ai-sdk/anthropic") {
+      const thinking = options?.["thinking"]
+      const budgetTokens = typeof thinking?.["budgetTokens"] === "number" ? thinking["budgetTokens"] : 0
+      const enabled = thinking?.["type"] === "enabled"
+      if (enabled && budgetTokens > 0) {
+        // Return text tokens so that text + thinking <= model cap, preferring 32k text when possible.
+        if (budgetTokens + standardLimit <= modelCap) {
+          return standardLimit
+        }
+        return modelCap - budgetTokens
       }
     }
-    return outputLimit
+
+    return standardLimit
   }
 
   export function schema(_providerID: string, _modelID: string, schema: JSONSchema.BaseSchema) {

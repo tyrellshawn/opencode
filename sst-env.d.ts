@@ -5,12 +5,20 @@
 
 declare module "sst" {
   export interface Resource {
-    ANTHROPIC_API_KEY: {
+    ADMIN_SECRET: {
       type: "sst.sst.Secret"
       value: string
     }
     AUTH_API_URL: {
       type: "sst.sst.Linkable"
+      value: string
+    }
+    AWS_SES_ACCESS_KEY_ID: {
+      type: "sst.sst.Secret"
+      value: string
+    }
+    AWS_SES_SECRET_ACCESS_KEY: {
+      type: "sst.sst.Secret"
       value: string
     }
     Api: {
@@ -22,15 +30,20 @@ declare module "sst" {
       url: string
     }
     AuthStorage: {
+      namespaceId: string
       type: "sst.cloudflare.Kv"
-    }
-    BASETEN_API_KEY: {
-      type: "sst.sst.Secret"
-      value: string
     }
     Bucket: {
       name: string
       type: "sst.cloudflare.Bucket"
+    }
+    CLOUDFLARE_API_TOKEN: {
+      type: "sst.sst.Secret"
+      value: string
+    }
+    CLOUDFLARE_DEFAULT_ACCOUNT_ID: {
+      type: "sst.sst.Secret"
+      value: string
     }
     Console: {
       type: "sst.cloudflare.SolidStart"
@@ -44,7 +57,11 @@ declare module "sst" {
       type: "sst.sst.Linkable"
       username: string
     }
-    FIREWORKS_API_KEY: {
+    Desktop: {
+      type: "sst.cloudflare.StaticSite"
+      url: string
+    }
+    EMAILOCTOPUS_API_KEY: {
       type: "sst.sst.Secret"
       value: string
     }
@@ -68,16 +85,16 @@ declare module "sst" {
       type: "sst.sst.Secret"
       value: string
     }
+    GatewayKv: {
+      namespaceId: string
+      type: "sst.cloudflare.Kv"
+    }
     HONEYCOMB_API_KEY: {
       type: "sst.sst.Secret"
       value: string
     }
     LogProcessor: {
       type: "sst.cloudflare.Worker"
-    }
-    OPENAI_API_KEY: {
-      type: "sst.sst.Secret"
-      value: string
     }
     STRIPE_SECRET_KEY: {
       type: "sst.sst.Secret"
@@ -91,7 +108,11 @@ declare module "sst" {
       type: "sst.cloudflare.Astro"
       url: string
     }
-    XAI_API_KEY: {
+    ZEN_MODELS1: {
+      type: "sst.sst.Secret"
+      value: string
+    }
+    ZEN_MODELS2: {
       type: "sst.sst.Secret"
       value: string
     }
