@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 
-const childProcess = require("child_process")
-const fs = require("fs")
-const path = require("path")
-const os = require("os")
+import { spawnSync } from "child_process"
+import fs from "fs"
+import path from "path"
+import os from "os"
+import { fileURLToPath } from "url"
+
+const __filename = fileURLToPath(import.meta.url)
 
 function run(target) {
-  const result = childProcess.spawnSync(target, process.argv.slice(2), {
+  const result = spawnSync(target, process.argv.slice(2), {
     stdio: "inherit",
   })
   if (result.error) {
@@ -73,6 +76,16 @@ function findBinary(startDir) {
 
 const resolved = findBinary(scriptDir)
 if (!resolved) {
+  // Fall back to running via bun in development
+  const srcPath = path.join(scriptDir, "..", "src", "index.ts")
+  if (fs.existsSync(srcPath)) {
+    const pkgDir = path.dirname(scriptDir)
+    const result = spawnSync("bun", ["run", "--conditions=browser", srcPath, ...process.argv.slice(2)], {
+      stdio: "inherit",
+      cwd: pkgDir,
+    })
+    process.exit(typeof result.status === "number" ? result.status : 0)
+  }
   console.error(
     'It seems that your package manager failed to install the right version of the opencode CLI for your platform. You can try manually installing the "' +
       base +

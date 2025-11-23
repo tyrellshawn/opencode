@@ -17,3 +17,13 @@ dist
 refs
 Session.vim
 opencode.json
+
+# Build artifacts and binaries
+.bin/
+.bin
+dist/
+**/.bin/
+**/.bin
+*.exe
+*.bin
+

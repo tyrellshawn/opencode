@@ -8,6 +8,7 @@
     "typecheck": "tsgo --noEmit",
     "test": "bun test",
     "build": "./script/build.ts",
+    "build:local": "./script/build-local.ts",
     "dev": "bun run --conditions=browser ./src/index.ts",
     "random": "echo 'Random script updated at $(date)'"
   },
@@ -22,6 +23,7 @@
     "@ai-sdk/google-vertex": "3.0.16",
     "@babel/core": "7.28.4",
     "@octokit/webhooks-types": "7.6.1",
+    "baseline-browser-mapping": "latest",
     "@parcel/watcher-darwin-arm64": "2.5.1",
     "@parcel/watcher-darwin-x64": "2.5.1",
     "@parcel/watcher-linux-arm64-glibc": "2.5.1",

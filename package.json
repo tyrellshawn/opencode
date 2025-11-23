@@ -50,6 +50,7 @@
   },
   "devDependencies": {
     "@tsconfig/bun": "catalog:",
+    "baseline-browser-mapping": "2.8.30",
     "husky": "9.1.7",
     "prettier": "3.6.2",
     "sst": "3.17.23",
