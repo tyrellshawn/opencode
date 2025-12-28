@@ -1,4 +1,8 @@
 #!/bin/sh
+# Skip husky for sync or prod branch
+if [ "$SKIP_HUSKY" = "1" ] || [ "$(git rev-parse --abbrev-ref HEAD)" = "prod" ]; then
+  exit 0
+fi
 # Check if bun version matches package.json
 EXPECTED_VERSION=$(grep '"packageManager"' package.json | sed 's/.*"bun@\([^"]*\)".*/\1/')
 CURRENT_VERSION=$(bun --version)
